@@ -25,8 +25,8 @@ def monitor(data, t, prio, eid, event):
 	data.append((t, eid, type(event)))
 
 class WorkFlow:
-	def __init__(self,env,name):
-		self.env = env
+	def __init__(self,topology,name):
+		self.topology = topology
 		self.name = name
 
 	def receive(self,packet):
@@ -36,13 +36,13 @@ class WorkFlow:
 		print self.env.now,"start file transfer",self.name
 		rate_limiter = 0
 		while not self.completed:
-			packet_size = min(self.mtu,self.file_size - self.received)
+			packet_size = min(self.block_size,self.data_size - self.received)
 			if packet_size + rate_limiter > self.max_rate:
 				rate_limiter = 0
 				yield self.env.timeout(1)
 			rate_limiter += packet_size
 			packet_name = self.name+"-"+str(self.packet_total + 1)
-			packet = Packet(env=self.env, size=packet_size,flow=self,name=packet_name,path=self.path)
+			packet = Packet(topology=self.topology,size=packet_size,flow=self,name=packet_name,path=self.path)
 			port_in = self.path[0]
 			success = port_in.router.forward(packet=packet, port_in=port_in)
 			if not success:
@@ -61,7 +61,7 @@ class WorkFlow:
 		else:
 			print self.env.now,self.name,"drop packet ",packet.name ,'broken link'
 		if self.env.now > (len(self.drop_data) - 1):
-			padding = numpy.zeros(self.env.now - len(self.drop_data) + 1)
+			padding = numpy.zeros(self.env.now - len(s,elf.drop_data) + 1)
 			if len(padding) > 0:
 				self.drop_data.extend(padding)
 		self.drop_data[self.env.now] += 1
@@ -71,21 +71,27 @@ class WorkFlow:
 
 
 class DataTransfer:
-	def __init__(self,env,name,path,file_size,max_rate,mtu=1):
-		self.env = env
+	def __init__(self,name,src,dst,topology,data_size,max_rate,block_size=1,path=None):
+		self.topology = topology
+		self.env = self.topology.env
 		self.name = name
-		self.file_size = file_size
+		self.data_size = data_size
 		self.received = 0
 		self.path = path
 		self.max_rate = max_rate
 		self.packet_drop = 0
 		self.packet_total = 0
 		self.completed = False
-		self.mtu = mtu
+		self.block_size = block_size
 		self.start_time = self.env.now
 		self.end_time = 0
 		self.throughput_data = []
 		self.drop_data = []
+		self.src = src
+		self.dst = dst
+		#if self.path == None:
+
+
 
 	def receive(self,packet):
 		if self.completed:
@@ -99,7 +105,7 @@ class DataTransfer:
 		
 		self.throughput_data[self.env.now] += packet.size
 
-		if (self.received >= self.file_size):
+		if (self.received >= self.data_size):
 			p = 100
 			if self.packet_total != 0:
 				p = self.packet_drop*100/self.packet_total
@@ -115,13 +121,13 @@ class DataTransfer:
 		print self.env.now,"start file transfer",self.name
 		rate_limiter = 0
 		while not self.completed:
-			packet_size = min(self.mtu,self.file_size - self.received)
+			packet_size = min(self.block_size,self.data_size - self.received)
 			if packet_size + rate_limiter > self.max_rate:
 				rate_limiter = 0
 				yield self.env.timeout(1)
 			rate_limiter += packet_size
 			packet_name = self.name+"-"+str(self.packet_total + 1)
-			packet = Packet(env=self.env, size=packet_size,flow=self,name=packet_name,path=self.path)
+			packet = Packet(topology=self.topology, size=packet_size,flow=self,name=packet_name,path=self.path)
 			port_in = self.path[0]
 			success = port_in.router.forward(packet=packet, port_in=port_in)
 			if not success:
@@ -156,8 +162,9 @@ class DataTransfer:
 		plt.ylabel('size')
 
 class Packet:
-	def __init__ (self,env,name,size,flow,path=[]):
-		self.env = env
+	def __init__ (self,topology,name,size,flow,path=[]):
+		self.topology = topology
+		self.env = toplogy.env
 		self.name = name
 		self.size = size
 		self.path = path
@@ -183,13 +190,14 @@ class Packet:
 
 
 class Router:
-	def __init__(self,name,env=None,topology=None,capacity=None):
-		self.env = env
-		self.name = name
-		self._ports = {}
-		self._fabric_links = {}
+	def __init__(self,name,topology=None,capacity=None):
 		self.topology = topology
-		self.capacity=None
+		self.env = topology.env
+		self.name = name
+		self.all_ports = {}
+		self.fabric_links = {}
+		self.topology = topology
+		self.capacity=capacity
 
 	def forward(self, port_in, packet):
 		if packet.is_last_port(current_port=port_in):
@@ -209,35 +217,35 @@ class Router:
 					print "either the router or the port must have a capacity set to something else than None"
 					return None
 				capacity = self.capacity
-			port_nb = str(len(self._ports) + 1)
+			port_nb = str(len(self.all_ports) + 1)
 			if name == None:
 				name =port_nb
 			else:
 				name = name + ":" + port_nb
-			port = Port(name=name,capacity=capacity)
+			port = Port(name=name,topology=self.topology,capacity=capacity)
 			port.router = self
-		self._ports[port.name] = port
-		for p in self._ports.values():
+		self.all_ports[port.name] = port
+		for p in self.all_ports.values():
 			if p == port:
 				continue
 			link_name_a_b = self.name + ":" + port.name + "->" + self.name + ":" + p.name
-			if not link_name_a_b in self._fabric_links:
-				link = Link(name=link_name_a_b,capacity=min(port.capacity,p.capacity),latency=0)
+			if not link_name_a_b in self.fabric_links:
+				link = Link(name=link_name_a_b,capacity=min(port.capacity,p.capacity),latency=0,topology=self.topology)
 				self.fabric_links[link.name] = name
 				port.links_out[link.name] = link
 				p.links_in[link.name] = link
 				link.port_in = port
 				link.port_out = p
-				self.topology._links[link.name] = link
+				self.topology.all_links[link.name] = link
 			link_name_b_a = self.name + ":" + p.name + "->" + self.name + ":" + port.name
-			if not link_name_b_a in self._fabric_links:
-				link = Link(name=link_name_b_a,capacity=min(port.capacity,p.capacity),latency=0)
+			if not link_name_b_a in self.fabric_links:
+				link = Link(name=link_name_b_a,capacity=min(port.capacity,p.capacity),latency=0,topology=self.topology)
 				self.fabric_links[link.name] = name
 				port.links_out[link.name] = link
 				p.links_in[link.name] = link
 				link.port_in = port
 				link.port_out = p
-				self.topology._links[link.name] = link
+				self.topology.all_links[link.name] = link
 		return port
 
 	def __str__(self):
@@ -246,15 +254,16 @@ class Router:
 		return self.__str__()
 
 class Port:
-	def __init__ (self,name,capacity,env=None):
-		self.env = env
+	def __init__ (self,name,topology,capacity):
+		self.topology = topology
+		self.env = topology.env
 		self.name = name
 		self.links_in = {}
 		self.links_out = {}		
 		self.capacity = capacity
-		self.interface = simpy.Container(env=self.env,capacity=self.capacity,init=self.capacity)
-		if (env != None):
-			self.set_env(env)
+		self.interface = simpy.Container(env=self.topology.env,capacity=self.capacity,init=self.capacity)
+		if self.env != None:
+			self.set_env(self.env)
 		self.router = None
 
 	def set_env(self, env):
@@ -293,17 +302,18 @@ class Port:
 		return self.name
 		
 class Link:
-	def __init__(self,name, delay=0, size=0,env=None):
+	def __init__(self,name, topology, latency=0, capacity=0):
 		self.name = name
-		self.env = env
-		self.delay = delay
-		self.size = 0
-		if self.size != 0:
-			self.store = simpy.Store(self.env, capacity=self.size)
+		self.topology = topology
+		self.env = topology.env
+		self.latency = latency
+		self.capacity = 0
+		if self.capacity != 0:
+			self.store = simpy.Store(self.env, capacity=self.capacity)
 		else:
 			self.store = simpy.Store(self.env)
-		if (env != None):
-			self.set_env(env)
+		if self.env != None:
+			self.set_env(self.env)
 		self.port_in = None
 		self.port_out = None
 
@@ -312,7 +322,7 @@ class Link:
 		self.receive = self.env.process(self.receive())
 
 	def latency(self, packet):
-		yield self.env.timeout(self.delay)
+		yield self.env.timeout(self.latency)
 		self.store.put(packet)
 
 	def put(self, packet):
@@ -343,11 +353,32 @@ def plot_it():
 	plt.legend()
 	plt.show()	
 
+
+class Endpoint(Router):
+	def __init__(self,name,topology,capacity,rate=0):
+		Router.__init__(self,name=name,capacity=capacity,topology=topology)
+		self.rate = rate
+		self.topology.all_routers[self.name] = self
+
+	def connect(self,router,latency=0):
+		if isinstance(router, basestring):
+			if router in self.topology.all_routers:
+				router = self.topology.all_routers[router]
+			else:
+				router = Router(name=router,capacity=capacity,topology=self.topology)
+				self.topology.all_routers[router.name] = router
+		self.topology.add_link(self, router, capacity=self.capacity, latency=latency)
+
+
 class Topology:
-	def __init__(self,name="Unknown"):
+	def __init__(self,name="Unknown",env=None,time_factor=1.0):
 		self.name = name
-		self._routers = {}
-		self._links = {} 
+		self.all_routers = {}
+		self.all_links = {} 
+		self.time_factor = time_factor
+		self.env = env
+		if self.env == None:
+			 self.env = simpy.rt.RealtimeEnvironment(factor=self.time_factor,strict=False)
 
 	def get_router(self,name):
 		if name in self.routers:
@@ -372,42 +403,42 @@ class Topology:
 			self.add_link(router_a=r_a, router_b=r_b, capacity=capacity, latency=latency)
 
 	def add_router(self, router):
-		if isinstance(router,basestring) and not router in self._routers:
+		if isinstance(router,basestring) and not router in self.all_routers:
 				router = Router(name=router, topology=self)
 		else:
-				rooter = self._routers[rooter]
+				rooter = self.all_routers[rooter]
 		router.topology = self
-		self._routers[router.name] = router
+		self.all_routers[router.name] = router
 
 
 	def add_link(self, router_a, router_b, capacity, latency):
 		if isinstance(router_a,basestring):
-			if router_a in self._routers:
-				router_a = self._routers[router_a]
+			if router_a in self.all_routers:
+				router_a = self.all_routers[router_a]
 			else:
-				router = Router(name=router_a,capacity=capacity)
-				self._routers[router_a] = router
+				router = Router(name=router_a,capacity=capacity,topology=self)
+				self.all_routers[router_a] = router
 				router_a = rooter
 		else:
-			if not router_a.name in self._routers:
-				self._routers[router_a.name] = router_a
+			if not router_a.name in self.all_routers:
+				self.all_routers[router_a.name] = router_a
 
 		if isinstance(router_b,basestring):
-			if router_b in self._routers:
-				router_b = self._routers[router_b]
+			if router_b in self.all_routers:
+				router_b = self.all_routers[router_b]
 			else:
-				router = Router(name=router_b,capacity=capacity)
-				self._routers[router_b] = router
+				router = Router(name=router_b,capacity=capacity,topology=self)
+				self.all_routers[router_b] = router
 				router_b = rooter
 		else:
-			if not router_b.name in self._routers:
-				self._routers[router_b.name] = router_b 
+			if not router_b.name in self.all_routers:
+				self.all_routers[router_b.name] = router_b 
 
 		port_a = router_a.add_port(name=router_a.name + "->" + router_b.name,capacity=capacity)
 		port_b = router_b.add_port(name=router_b.name + "->" + router_b.name,capacity=capacity)
 
-		link_a_b = Link(name = router_a.name+":"+port_a.name+"->"+router_b.name+":"+router_b.name, delay=latency, size=capacity)
-		link_b_a = Link(name = router_b.name+":"+router_b.name+"->"+router_a.name+":"+port_a.name, delay=latency, size=capacity)
+		link_a_b = Link(name = router_a.name+":"+port_a.name+"->"+router_b.name+":"+router_b.name, latency=latency, capacity=capacity,topology=self)
+		link_b_a = Link(name = router_b.name+":"+router_b.name+"->"+router_a.name+":"+port_a.name, latency=latency, capacity=capacity,topology=self)
 		port_a.links_out[link_a_b] = link_a_b
 		port_b.links_in[link_a_b] = link_a_b
 		link_a_b.port_in = port_a
@@ -416,12 +447,27 @@ class Topology:
 		port_a.links_in[link_b_a] = link_b_a
 		link_b_a.port_in = port_b
 		link_b_a.port_out = port_a
-		self._links[link_a_b.name] = link_a_b
-		self._links[link_b_a.name] = link_b_a
+		self.all_links[link_a_b.name] = link_a_b
+		self.all_links[link_b_a.name] = link_b_a
+
+	def background_event(self, tick=1):
+		print "BACKGROUND", self.env._factor
+		while True:
+			print "TICK",self.env.now,1/self.env.factor
+			yield self.env.timeout(1/self.env.factor)
+
+	def start_simulation(self, duration):
+		print "Simulation starts at ",self.env.now, "and will run until ", self.env.now + duration
+		self.env.process(self.background_event())
+		self.env.run(until=self.env.now + duration)
+		print "Simulation stops at",self.env.now
+
+	def stop_simulation(self):
+		self.env.run(until=self.env.now +1)
 
 	def get_graph(self):
 		graph = nx.Graph()
-		for link in self._links.values():
+		for link in self.all_links.values():
 				port_a = link.port_in
 				port_b = link.port_out
 				graph.add_edge(port_a,port_b)
@@ -436,64 +482,29 @@ class Topology:
 		plt.axis('off')
 		plt.show()
 
+	def test(self):
+		print "Begin"
 
-def run_it():
-	#env = simpy.Environment()
-	env = simpy.rt.RealtimeEnvironment(initial_time=0, factor=1, strict=False)
+		topo = Topology("test topology", time_factor=1)
 
-	#data = []
-	#monitor = partial(monitor, data)
-	#trace(env, monitor)
+		topo.add_routers(['router1','router2'])
+		topo.add_link(router_a='router1',router_b='router2',capacity=10,latency=0) 
 
+		server1 = Endpoint(name='server1',topology=topo,capacity=10,rate=8)
+		server1.connect('router1')
+		server2 = Endpoint(name='server2',topology=topo,capacity=10,rate=8)
+		server2.connect('router2')
 
-	link_1_3 = Link(env=env,delay=0,name="link-1-3")
-	link_3_1 = Link(env=env,delay=0,name="link-3-1")
+		flow1 = DataTransfer(name="flow1",
+		                     src=server1,
+		                     dst=server2,
+		                     data_size=1000,
+		                     block_size=10,
+		                     max_rate=8,
+		                     topology=topo)
 
-	link_2_3 = Link(env=env,delay=0,name="link-2-3")
-	link_3_2 = Link(env=env,delay=0,name="link-3-2")
+		print "start"
+		topo.start_simulation(duration=20)
+		print "stop"
 
-	port_1 = Port (env=env,capacity=10,name="port-1")
-	port_2 = Port (env=env,capacity=10,name="port-2")
-	port_3 = Port (env=env,capacity=10,name="port-3")
-
-	port_1.add_link_out(link=link_1_3, remote_port=port_3)
-	port_1.add_link_in(link=link_3_1, remote_port=port_3)
-
-	port_3.add_link_out(link=link_3_1, remote_port=port_1)
-	port_3.add_link_in(link=link_1_3, remote_port=port_1)
-
-	port_2.add_link_out(link=link_2_3, remote_port=port_3)
-	port_2.add_link_in(link=link_3_2, remote_port=port_3)
-
-	port_3.add_link_out(link=link_3_2, remote_port=port_2)
-	port_3.add_link_in(link=link_2_3, remote_port=port_2)
-
-
-
-
-	router_1 = Router(env=env,name="router-1",ports=[port_1,port_2,port_3])
-
-	path_file_1_3__1 = [port_1, port_3]
-	file_1_3__1 = DataTransfer(env=env,path=path_file_1_3__1,mtu=1,file_size=30,max_rate=2,name="file_1-3:1")
-
-	path_file_2_3__1 = [port_2, port_3]
-	file_2_3__1 = DataTransfer(env=env,path=path_file_2_3__1,mtu=1,file_size=30,max_rate=10,name="file_2-3:1")
-
-	path_file_2_3__2 = [port_2, port_3]
-	file_2_3__2 = DataTransfer(env=env,path=path_file_2_3__2,mtu=1,file_size=30,max_rate=10,name="file_2-3:2")
-
-	files=[file_1_3__1,file_2_3__1,file_2_3__2]
-
-	for f in files:
-		env.process(f.start())
-
-	#env.process(plot_all(env=env, files=[file_1_3__1,file_2_3__1]))
-
-	print env.now,"Start simulation"
-	env.run(until=20)
-	print env.now,"Simulation has stoped"
-	plot_it()
-
-
-#topo = Topology(name="test")
 
