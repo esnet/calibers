@@ -5,11 +5,6 @@ import matplotlib, numpy
 import matplotlib.pyplot as plt
 import networkx as nx
 
-_routers = {}
-_links = {}
-_flows = {}
-
-
 def trace(env, callback):
 	def get_wrapper(env_step, callback):
 		@wraps(env_step)
@@ -39,7 +34,7 @@ class WorkFlow:
 			packet_size = min(self.block_size,self.data_size - self.received)
 			if packet_size + rate_limiter > self.max_rate:
 				rate_limiter = 0
-				yield self.env.timeout(1)
+				yield self.topology.timeout(1000)
 			rate_limiter += packet_size
 			packet_name = self.name+"-"+str(self.packet_total + 1)
 			packet = Packet(topology=self.topology,size=packet_size,flow=self,name=packet_name,path=self.path)
@@ -47,10 +42,10 @@ class WorkFlow:
 			success = port_in.router.forward(packet=packet, port_in=port_in)
 			if not success:
 				rate_limiter -= packet_size
-				yield self.env.timeout(1)
+				yield self.topology.timeout(1000)
 			else:	
 				self.packet_total += 1	
-				yield self.env.timeout(0)	
+				yield self.topology.env.timeout(0)	
 
 
 	def failed(self, packet,net_elem):
@@ -89,9 +84,11 @@ class DataTransfer:
 		self.drop_data = []
 		self.src = src
 		self.dst = dst
-		#if self.path == None:
-
-
+		if self.path == None:
+			src_port = self.src.all_ports.values()[0]
+			dst_port = self.dst.all_ports.values()[0]
+			g = self.topology.get_graph()
+			self.path = nx.shortest_path(g, src_port, dst_port)
 
 	def receive(self,packet):
 		if self.completed:
@@ -118,13 +115,14 @@ class DataTransfer:
 			print self.env.now,self.name,'success',self.received,'packets',self.packet_total,'average',average_rate,'drop',self.packet_drop,' ',p,'%'
 
 	def start(self):
+		#import pdb; pdb.set_trace()
 		print self.env.now,"start file transfer",self.name
 		rate_limiter = 0
 		while not self.completed:
 			packet_size = min(self.block_size,self.data_size - self.received)
 			if packet_size + rate_limiter > self.max_rate:
 				rate_limiter = 0
-				yield self.env.timeout(1)
+				yield self.topology.timeout(1000)
 			rate_limiter += packet_size
 			packet_name = self.name+"-"+str(self.packet_total + 1)
 			packet = Packet(topology=self.topology, size=packet_size,flow=self,name=packet_name,path=self.path)
@@ -132,10 +130,10 @@ class DataTransfer:
 			success = port_in.router.forward(packet=packet, port_in=port_in)
 			if not success:
 				rate_limiter -= packet_size
-				yield self.env.timeout(1)
+				yield self.topology.timeout(1000)
 			else:	
 				self.packet_total += 1	
-				yield self.env.timeout(0)	
+				yield self.topology.env.timeout(0)	
 
 
 	def failed(self, packet,net_elem):
@@ -164,7 +162,7 @@ class DataTransfer:
 class Packet:
 	def __init__ (self,topology,name,size,flow,path=[]):
 		self.topology = topology
-		self.env = toplogy.env
+		self.env = topology.env
 		self.name = name
 		self.size = size
 		self.path = path
@@ -205,7 +203,7 @@ class Router:
 			return
 		next_port = packet.next_port(current_port = port_in)
 		if next_port != None:
-			link = port_in.get_link_out(remote_port=next_port)
+			link = port_in.links_out[next_port.name]
 			return next_port.send(packet=packet, link_out=link)
 		else:
 			packet.failed(net_elem=port_in)
@@ -232,8 +230,8 @@ class Router:
 			if not link_name_a_b in self.fabric_links:
 				link = Link(name=link_name_a_b,capacity=min(port.capacity,p.capacity),latency=0,topology=self.topology)
 				self.fabric_links[link.name] = name
-				port.links_out[link.name] = link
-				p.links_in[link.name] = link
+				port.links_out[p.name] = link
+				p.links_in[port.name] = link
 				link.port_in = port
 				link.port_out = p
 				self.topology.all_links[link.name] = link
@@ -241,8 +239,8 @@ class Router:
 			if not link_name_b_a in self.fabric_links:
 				link = Link(name=link_name_b_a,capacity=min(port.capacity,p.capacity),latency=0,topology=self.topology)
 				self.fabric_links[link.name] = name
-				port.links_out[link.name] = link
-				p.links_in[link.name] = link
+				port.links_out[p.name] = link
+				p.links_in[port.name] = link
 				link.port_in = port
 				link.port_out = p
 				self.topology.all_links[link.name] = link
@@ -276,7 +274,7 @@ class Port:
 			#print self.env.now,self.name,"transmit",self.capacity-self.interface.level,'remains',self.interface.level
 			if amount > 0:
 				yield self.interface.put(amount)
-			yield self.env.timeout(1)
+			yield self.topology.timeout(1000)
 
 	def send(self,packet,link_out):
 		if self.interface.level < packet.size:
@@ -290,7 +288,7 @@ class Port:
 		if self.interface.level < packet.size:
 			packet.failed(net_elem=self)
 			return
-		timeout = self.env.timeout(1)
+		timeout = self.topology.timeout(1000)
 		res = yield self.interface.get(packet.size) | timeout
 		if timeout in res:
 			packet.failed(net_elem=self)
@@ -322,7 +320,7 @@ class Link:
 		self.receive = self.env.process(self.receive())
 
 	def latency(self, packet):
-		yield self.env.timeout(self.latency)
+		yield self.topology.timeout(self.latency)
 		self.store.put(packet)
 
 	def put(self, packet):
@@ -339,6 +337,9 @@ class Link:
 				packet.failed(net_elem=self)
 				return
 			self.port_in.router.forward(packet=packet,port_in = self.port_in)
+
+	def __str__(self):
+		return self.name
 			
 def plot_all(env,files):
 	while True:
@@ -368,17 +369,18 @@ class Endpoint(Router):
 				router = Router(name=router,capacity=capacity,topology=self.topology)
 				self.topology.all_routers[router.name] = router
 		self.topology.add_link(self, router, capacity=self.capacity, latency=latency)
-
+	def __str__(self):
+		return self.name
 
 class Topology:
-	def __init__(self,name="Unknown",env=None,time_factor=1.0):
+	def __init__(self,name="Unknown",env=None,tick_millis=10):
 		self.name = name
 		self.all_routers = {}
 		self.all_links = {} 
-		self.time_factor = time_factor
+		self.tick_millis = tick_millis
 		self.env = env
 		if self.env == None:
-			 self.env = simpy.rt.RealtimeEnvironment(factor=self.time_factor,strict=False)
+			 self.env = simpy.Environment()
 
 	def get_router(self,name):
 		if name in self.routers:
@@ -439,27 +441,39 @@ class Topology:
 
 		link_a_b = Link(name = router_a.name+":"+port_a.name+"->"+router_b.name+":"+router_b.name, latency=latency, capacity=capacity,topology=self)
 		link_b_a = Link(name = router_b.name+":"+router_b.name+"->"+router_a.name+":"+port_a.name, latency=latency, capacity=capacity,topology=self)
-		port_a.links_out[link_a_b] = link_a_b
-		port_b.links_in[link_a_b] = link_a_b
+		port_a.links_out[port_b.name] = link_a_b
+		port_b.links_in[port_a.name] = link_a_b
 		link_a_b.port_in = port_a
 		link_a_b.port_out = port_b
-		port_b.links_out[link_b_a] = link_b_a
-		port_a.links_in[link_b_a] = link_b_a
+		port_b.links_out[port_a.name] = link_b_a
+		port_a.links_in[port_b.name] = link_b_a
 		link_b_a.port_in = port_b
 		link_b_a.port_out = port_a
+
 		self.all_links[link_a_b.name] = link_a_b
 		self.all_links[link_b_a.name] = link_b_a
 
-	def background_event(self, tick=1):
-		print "BACKGROUND", self.env._factor
-		while True:
-			print "TICK",self.env.now,1/self.env.factor
-			yield self.env.timeout(1/self.env.factor)
+	def timeout(self,millisecs):
+		if millisecs < self.tick_millis:
+			print "Cannot create timeout of ",millisecs," because tick time is too long:", self.tick_millis
+			return self.env.timeout(self.tick_millis)
+		return self.env.timeout(millisecs/self.tick_millis)
 
-	def start_simulation(self, duration):
+	def now(self):
+		return self.env.now * self.tick_millis
+
+	def start_simulation(self, until_sec=0, until_millis=0):
+		duration = 0
+		if until_millis > 0:
+			duration = until_millis
+		if until_sec > 0:
+			duration = until_sec * 1000
+		duration = numpy.ceil(duration / self.tick_millis)
 		print "Simulation starts at ",self.env.now, "and will run until ", self.env.now + duration
-		self.env.process(self.background_event())
-		self.env.run(until=self.env.now + duration)
+		if duration > 0:
+			self.env.run(until=self.env.now + duration)
+		else:
+			self.env.run()
 		print "Simulation stops at",self.env.now
 
 	def stop_simulation(self):
@@ -485,7 +499,7 @@ class Topology:
 	def test(self):
 		print "Begin"
 
-		topo = Topology("test topology", time_factor=1)
+		topo = Topology("test topology", tick_millis=10)
 
 		topo.add_routers(['router1','router2'])
 		topo.add_link(router_a='router1',router_b='router2',capacity=10,latency=0) 
