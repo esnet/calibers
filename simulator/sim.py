@@ -28,25 +28,7 @@ class WorkFlow:
 		return
 
 	def start(self):
-		print self.env.now,"start file transfer",self.name
-		rate_limiter = 0
-		while not self.completed:
-			packet_size = min(self.block_size,self.data_size - self.received)
-			if packet_size + rate_limiter > self.max_rate:
-				rate_limiter = 0
-				yield self.topology.timeout(1000)
-			rate_limiter += packet_size
-			packet_name = self.name+"-"+str(self.packet_total + 1)
-			packet = Packet(topology=self.topology,size=packet_size,flow=self,name=packet_name,path=self.path)
-			port_in = self.path[0]
-			success = port_in.router.forward(packet=packet, port_in=port_in)
-			if not success:
-				rate_limiter -= packet_size
-				yield self.topology.timeout(1000)
-			else:	
-				self.packet_total += 1	
-				yield self.topology.env.timeout(0)	
-
+		return
 
 	def failed(self, packet,net_elem):
 		if self.completed:
@@ -61,8 +43,6 @@ class WorkFlow:
 				self.drop_data.extend(padding)
 		self.drop_data[self.env.now] += 1
 		self.packet_drop += 1
-
-
 
 
 class DataTransfer:
@@ -94,7 +74,7 @@ class DataTransfer:
 		if self.completed:
 			return
 		self.received += packet.size
-		# print self.env.now,self.name,"packet received",packet.name,packet.size,self.received
+		print self.env.now,self.name,"packet received",packet.name,packet.size,self.received
 		if self.env.now > (len(self.throughput_data) - 1):
 			padding = numpy.zeros(self.env.now - len(self.throughput_data) + 1)
 			if len(padding) > 0:
@@ -109,38 +89,31 @@ class DataTransfer:
 			self.completed = True
 			self.end_time = self.env.now
 			duration = self.start_time - self.end_time
-			average_rate = packet.size / duration
 			if len(self.throughput_data) > len(self.drop_data):
 				self.drop_data.extend(numpy.zeros(len(self.throughput_data) - len(self.drop_data)))
-			print self.env.now,self.name,'success',self.received,'packets',self.packet_total,'average',average_rate,'drop',self.packet_drop,' ',p,'%'
+			print self.env.now,self.name,'success',self.received,'packets',self.packet_total,'drop',self.packet_drop,' ',p,'%'
 
 	def start(self):
 		#import pdb; pdb.set_trace()
 		print self.env.now,"start file transfer",self.name
-		rate_limiter = 0
+
+		max_rate_per_tick = numpy.ceil(float(self.max_rate) / self.topology.ticks_per_sec) 
+
 		while not self.completed:
-			packet_size = min(self.block_size,self.data_size - self.received)
-			if packet_size + rate_limiter > self.max_rate:
-				rate_limiter = 0
-				yield self.topology.timeout(1000)
-			rate_limiter += packet_size
+			packet_size = min(self.block_size,self.data_size - self.received, max_rate_per_tick)
 			packet_name = self.name+"-"+str(self.packet_total + 1)
 			packet = Packet(topology=self.topology, size=packet_size,flow=self,name=packet_name,path=self.path)
 			port_in = self.path[0]
-			success = port_in.router.forward(packet=packet, port_in=port_in)
-			if not success:
-				rate_limiter -= packet_size
-				yield self.topology.timeout(1000)
-			else:	
-				self.packet_total += 1	
-				yield self.topology.env.timeout(0)	
+			port_in.router.forward(packet=packet, port_in=port_in)	
+			self.packet_total += 1
+			yield self.topology.env.timeout(1)
 
 
 	def failed(self, packet,net_elem):
 		if self.completed:
 			return
 		if net_elem != None:
-			print self.env.now,self.name,"drop packet ",packet.name ,"where",net_elem.name
+			print self.env.now,self.name,"drop packet ",packet.name ,"at",net_elem.name
 		else:
 			print self.env.now,self.name,"drop packet ",packet.name ,'broken link'
 		if self.env.now > (len(self.drop_data) - 1):
@@ -185,6 +158,11 @@ class Packet:
 		if self.flow != None:
 			self.flow.failed(packet=self,net_elem=net_elem)
 
+	def __str__(self):
+		return self.name
+	def __repr__(self):
+		return self.__str__()
+
 
 
 class Router:
@@ -203,8 +181,11 @@ class Router:
 			return
 		next_port = packet.next_port(current_port = port_in)
 		if next_port != None:
+			if not next_port.name in port_in.links_out:
+				packet.failed(net_elem=port_in)
+				return
 			link = port_in.links_out[next_port.name]
-			return next_port.send(packet=packet, link_out=link)
+			port_in.send(packet=packet, link_out=link)
 		else:
 			packet.failed(net_elem=port_in)
 
@@ -235,15 +216,17 @@ class Router:
 				link.port_in = port
 				link.port_out = p
 				self.topology.all_links[link.name] = link
+
 			link_name_b_a = self.name + ":" + p.name + "->" + self.name + ":" + port.name
 			if not link_name_b_a in self.fabric_links:
 				link = Link(name=link_name_b_a,capacity=min(port.capacity,p.capacity),latency=0,topology=self.topology)
 				self.fabric_links[link.name] = name
-				port.links_out[p.name] = link
-				p.links_in[port.name] = link
-				link.port_in = port
-				link.port_out = p
+				p.links_out[port.name] = link
+				port.links_in[p.name] = link
+				link.port_in = p
+				link.port_out = port
 				self.topology.all_links[link.name] = link
+
 		return port
 
 	def __str__(self):
@@ -261,12 +244,9 @@ class Port:
 		self.capacity = capacity
 		self.interface = simpy.Container(env=self.topology.env,capacity=self.capacity,init=self.capacity)
 		if self.env != None:
-			self.set_env(self.env)
+			self.env.process(self.release_interface())
 		self.router = None
-
-	def set_env(self, env):
-		self.env = env
-		self.env.process(self.release_interface())
+		self.topology.all_ports[self.name] = self
 
 	def release_interface(self):
 		while True:
@@ -274,21 +254,21 @@ class Port:
 			#print self.env.now,self.name,"transmit",self.capacity-self.interface.level,'remains',self.interface.level
 			if amount > 0:
 				yield self.interface.put(amount)
-			yield self.topology.timeout(1000)
+			yield self.env.timeout(1)
 
 	def send(self,packet,link_out):
 		if self.interface.level < packet.size:
 			packet.failed(net_elem=self)
-			return False
+			return
 		self.env.process(self.do_send(packet=packet, link_out=link_out))
-		return True
+		return
 
 	def do_send(self,packet,link_out):
 		#print self.env.now,self.name,"send",packet.name,packet.size,'avail capacity',self.interface.level,'drop',packet.flow.packet_drop
 		if self.interface.level < packet.size:
 			packet.failed(net_elem=self)
 			return
-		timeout = self.topology.timeout(1000)
+		timeout = self.topology.env.timeout(1)
 		res = yield self.interface.get(packet.size) | timeout
 		if timeout in res:
 			packet.failed(net_elem=self)
@@ -298,6 +278,8 @@ class Port:
 
 	def __str__(self):
 		return self.name
+	def __repr__(self):
+		return self.__str__()
 		
 class Link:
 	def __init__(self,name, topology, latency=0, capacity=0):
@@ -311,13 +293,9 @@ class Link:
 		else:
 			self.store = simpy.Store(self.env)
 		if self.env != None:
-			self.set_env(self.env)
+			self.receive = self.env.process(self.receive())
 		self.port_in = None
 		self.port_out = None
-
-	def set_env(self,env):
-		self.env = env
-		self.receive = self.env.process(self.receive())
 
 	def latency(self, packet):
 		yield self.topology.timeout(self.latency)
@@ -330,13 +308,12 @@ class Link:
 			self.store.put(packet)
 	
 	def receive(self):
-		# print self.env.now,self.name,'ready'
-		while True:
+		while True: 
 			packet = yield self.store.get()
 			if self.port_in == None or self.port_in.router == None:
 				packet.failed(net_elem=self)
 				return
-			self.port_in.router.forward(packet=packet,port_in = self.port_in)
+			self.port_out.router.forward(packet=packet, port_in=self.port_out)
 
 	def __str__(self):
 		return self.name
@@ -373,11 +350,13 @@ class Endpoint(Router):
 		return self.name
 
 class Topology:
-	def __init__(self,name="Unknown",env=None,tick_millis=10):
+	def __init__(self,name="Unknown",env=None,ticks_per_sec=10):
 		self.name = name
 		self.all_routers = {}
+		self.all_ports = {}
 		self.all_links = {} 
-		self.tick_millis = tick_millis
+		self.tick_millis = numpy.round(1000 / ticks_per_sec)
+		self.ticks_per_sec = ticks_per_sec
 		self.env = env
 		if self.env == None:
 			 self.env = simpy.Environment()
@@ -453,6 +432,12 @@ class Topology:
 		self.all_links[link_a_b.name] = link_a_b
 		self.all_links[link_b_a.name] = link_b_a
 
+
+	def timeout_until_next_sec(self):
+		now = self.env.now * self.tick_millis
+		remain = (now/1000 + 1) * 1000 - now
+		return self.timeout(remain)
+
 	def timeout(self,millisecs):
 		if millisecs < self.tick_millis:
 			print "Cannot create timeout of ",millisecs," because tick time is too long:", self.tick_millis
@@ -496,29 +481,5 @@ class Topology:
 		plt.axis('off')
 		plt.show()
 
-	def test(self):
-		print "Begin"
-
-		topo = Topology("test topology", tick_millis=10)
-
-		topo.add_routers(['router1','router2'])
-		topo.add_link(router_a='router1',router_b='router2',capacity=10,latency=0) 
-
-		server1 = Endpoint(name='server1',topology=topo,capacity=10,rate=8)
-		server1.connect('router1')
-		server2 = Endpoint(name='server2',topology=topo,capacity=10,rate=8)
-		server2.connect('router2')
-
-		flow1 = DataTransfer(name="flow1",
-		                     src=server1,
-		                     dst=server2,
-		                     data_size=1000,
-		                     block_size=10,
-		                     max_rate=8,
-		                     topology=topo)
-
-		print "start"
-		topo.start_simulation(duration=20)
-		print "stop"
 
 
