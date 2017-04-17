@@ -1,7 +1,8 @@
 from functools import partial, wraps
 import simpy
 
-import matplotlib, numpy
+import matplotlib
+import numpy as np
 import matplotlib.pyplot as plt
 import networkx as nx
 
@@ -23,6 +24,8 @@ class WorkFlow:
 	def __init__(self,topology,name):
 		self.topology = topology
 		self.name = name
+		self.debug = False
+		self.info = True
 
 	def receive(self,packet):
 		return
@@ -31,25 +34,13 @@ class WorkFlow:
 		return
 
 	def failed(self, packet,net_elem):
-		if self.completed:
-			return
-		if net_elem != None:
-			print self.env.now,self.name,"drop packet ",packet.name ,"where",net_elem.name
-		else:
-			print self.env.now,self.name,"drop packet ",packet.name ,'broken link'
-		if self.env.now > (len(self.drop_data) - 1):
-			padding = numpy.zeros(self.env.now - len(s,elf.drop_data) + 1)
-			if len(padding) > 0:
-				self.drop_data.extend(padding)
-		self.drop_data[self.env.now] += 1
-		self.packet_drop += 1
+		return
 
 
-class DataTransfer:
+class DataTransfer(WorkFlow):
 	def __init__(self,name,src,dst,topology,data_size,max_rate,block_size=1,path=None):
-		self.topology = topology
+		WorkFlow.__init__(self,topology=topology, name=name)
 		self.env = self.topology.env
-		self.name = name
 		self.data_size = data_size
 		self.received = 0
 		self.path = path
@@ -60,8 +51,8 @@ class DataTransfer:
 		self.block_size = block_size
 		self.start_time = self.env.now
 		self.end_time = 0
-		self.throughput_data = []
-		self.drop_data = []
+		self.receive_data = [[0,0]]
+		self.drop_data = [[0,0]]
 		self.src = src
 		self.dst = dst
 		if self.path == None:
@@ -74,13 +65,10 @@ class DataTransfer:
 		if self.completed:
 			return
 		self.received += packet.size
-		print self.env.now,self.name,"packet received",packet.name,packet.size,self.received
-		if self.env.now > (len(self.throughput_data) - 1):
-			padding = numpy.zeros(self.env.now - len(self.throughput_data) + 1)
-			if len(padding) > 0:
-				self.throughput_data.extend(padding)
-		
-		self.throughput_data[self.env.now] += packet.size
+
+		if self.debug: print self.env.now,self.name,"packet received",packet.name,packet.size,self.received
+
+		self.receive_data.append([self.topology.now(),packet.size])
 
 		if (self.received >= self.data_size):
 			p = 100
@@ -89,15 +77,13 @@ class DataTransfer:
 			self.completed = True
 			self.end_time = self.env.now
 			duration = self.start_time - self.end_time
-			if len(self.throughput_data) > len(self.drop_data):
-				self.drop_data.extend(numpy.zeros(len(self.throughput_data) - len(self.drop_data)))
-			print self.env.now,self.name,'success',self.received,'packets',self.packet_total,'drop',self.packet_drop,' ',p,'%'
+			if self.info: print self.env.now,self.name,'success',self.received,'packets',self.packet_total,'drop',self.packet_drop,' ',p,'%'
 
 	def start(self):
 		#import pdb; pdb.set_trace()
-		print self.env.now,"start file transfer",self.name
+		if self.info: print self.env.now,"start file transfer",self.name
 
-		max_rate_per_tick = numpy.ceil(float(self.max_rate) / self.topology.ticks_per_sec) 
+		max_rate_per_tick = int(np.ceil(float(self.max_rate) / self.topology.ticks_per_sec))
 
 		while not self.completed:
 			packet_size = min(self.block_size,self.data_size - self.received, max_rate_per_tick)
@@ -113,24 +99,22 @@ class DataTransfer:
 		if self.completed:
 			return
 		if net_elem != None:
-			print self.env.now,self.name,"drop packet ",packet.name ,"at",net_elem.name
+			if self.debug: print self.env.now,self.name,"drop packet ",packet.name ,"at",net_elem.name
 		else:
-			print self.env.now,self.name,"drop packet ",packet.name ,'broken link'
-		if self.env.now > (len(self.drop_data) - 1):
-			padding = numpy.zeros(self.env.now - len(self.drop_data) + 1)
-			if len(padding) > 0:
-				self.drop_data.extend(padding)
-		self.drop_data[self.env.now] += 1
+			if self.debug: print self.env.now,self.name,"drop packet ",packet.name ,'broken link'
+		self.drop_data.append([self.topology.now(),packet.size])
 		self.packet_drop += 1
 
 	def plot(self):
 		#print self.throughput_data
 		#print self.drop_data
-		plt.plot(self.throughput_data,label=self.name + "throughput")
-		plt.plot(self.drop_data,label=self.name + "drop")
+		x,y = zip(*self.receive_data)
+		plt.plot(x,y,label=self.name + "throughput")
+		x,y = zip(*self.drop_data)
+		plt.plot(x,y,label=self.name + "drop")
 		#plt.plot(self.throughput_data,self.drop_data)
-		plt.xlabel('time in seconds')
-		plt.ylabel('size')
+		plt.xlabel('milliseconds')
+		plt.ylabel('Mb')
 
 class Packet:
 	def __init__ (self,topology,name,size,flow,path=[]):
@@ -355,7 +339,7 @@ class Topology:
 		self.all_routers = {}
 		self.all_ports = {}
 		self.all_links = {} 
-		self.tick_millis = numpy.round(1000 / ticks_per_sec)
+		self.tick_millis = np.round(1000 / ticks_per_sec)
 		self.ticks_per_sec = ticks_per_sec
 		self.env = env
 		if self.env == None:
@@ -453,7 +437,7 @@ class Topology:
 			duration = until_millis
 		if until_sec > 0:
 			duration = until_sec * 1000
-		duration = numpy.ceil(duration / self.tick_millis)
+		duration = np.ceil(duration / self.tick_millis)
 		print "Simulation starts at ",self.env.now, "and will run until ", self.env.now + duration
 		if duration > 0:
 			self.env.run(until=self.env.now + duration)
