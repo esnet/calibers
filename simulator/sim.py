@@ -105,16 +105,19 @@ class DataTransfer(WorkFlow):
 		self.drop_data.append([self.topology.now(),packet.size])
 		self.packet_drop += 1
 
-	def plot(self):
-		#print self.throughput_data
-		#print self.drop_data
+	def plot_receive(self):
 		x,y = zip(*self.receive_data)
 		plt.plot(x,y,label=self.name + "throughput")
+		plt.xlabel('milliseconds')
+		plt.ylabel('Mb')
+
+	def plot_drop(self):
 		x,y = zip(*self.drop_data)
 		plt.plot(x,y,label=self.name + "drop")
 		#plt.plot(self.throughput_data,self.drop_data)
 		plt.xlabel('milliseconds')
 		plt.ylabel('Mb')
+
 
 class Packet:
 	def __init__ (self,topology,name,size,flow,path=[]):
@@ -302,19 +305,6 @@ class Link:
 	def __str__(self):
 		return self.name
 			
-def plot_all(env,files):
-	while True:
-		for f in files:
-			f.plot()
-		plt.show()
-		yield(env.timeout(1))
-
-def plot_it():
-	for f in _flows:
-		f.plot()
-	plt.legend()
-	plt.show()	
-
 
 class Endpoint(Router):
 	def __init__(self,name,topology,capacity,rate=0):
@@ -448,6 +438,25 @@ class Topology:
 	def stop_simulation(self):
 		self.env.run(until=self.env.now +1)
 
+	def schedule_workflow(self, workflow, when_sec=0, when_millis=0,delay_sec=0, delay_millis=0):
+		timeout = None
+		if when_sec > 0:
+			when_millis = when_sec * 1000
+		if when_millis > 0:
+			if when_millis < self.now():
+				print "Cannot schedule workflow in the past"
+				return
+			delay_millis = self.when_millis - self.now()
+		else:
+			if delay_sec > 0:
+				delay_millis = delay_sec * 1000
+		if delay_millis > 0:
+			timeout = self.timeout(delay_millis)
+		#if timeout != None:
+		#	yield timeout
+		p = self.env.process(workflow.start())
+		workflow.main_process = p
+
 	def get_graph(self):
 		graph = nx.Graph()
 		for link in self.all_links.values():
@@ -463,6 +472,10 @@ class Topology:
 		nx.draw_networkx_nodes(graph,pos,node_size=100,alpha=0.5,color='b')
 		nx.draw_networkx_labels(graph,pos,font_size=8,font_family='sans-serif')
 		plt.axis('off')
+		plt.show()
+
+	def show_plots(self):
+		plt.legend()
 		plt.show()
 
 
