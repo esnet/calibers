@@ -57,6 +57,8 @@ class DataTransfer(WorkFlow):
 		self.drop_data = []
 		self.src = src
 		self.dst = dst
+		self.congested = False
+		self.last_rtt = 0
 		if self.increase == None:
 			self.increase = self.increase_default
 		self.decrease = decrease
@@ -67,6 +69,14 @@ class DataTransfer(WorkFlow):
 			dst_port = self.dst.all_ports.values()[0]
 			g = self.topology.get_graph()
 			self.path = nx.shortest_path(g, src_port, dst_port)
+			self.graph = g
+		self.latest_rtt = self.topology.rtt(path=self.path)
+
+	def rtt_tick(self):
+		while True:
+			yield self.topology.timeout(self.latest_rtt)
+			if not self.congested:
+				self.increase()
 
 	def increase_default(self):
 		self.current_rate = min (self.current_rate + self.increase_step, self.max_rate)
@@ -80,7 +90,7 @@ class DataTransfer(WorkFlow):
 		self.received += packet.size
 		if self.debug: print self.env.now,self.name,"packet received",packet.name,packet.size,self.received
 		self.receive_data.append([self.topology.env.now,packet.size])
-		self.increase()
+		self.lastest_rtt = self.topology.rtt(packet.path)
 		if (self.received >= self.data_size):
 			p = 100
 			if self.packet_total != 0:
@@ -95,6 +105,8 @@ class DataTransfer(WorkFlow):
 		if self.info: print self.env.now,"start file transfer",self.name
 
 		max_rate_per_tick = int(np.ceil(float(self.max_rate) / self.topology.ticks_per_sec))
+
+		self.topology.env.process(self.rtt_tick())
 
 		while not self.completed:
 			rate_per_tick = int(np.ceil(float(self.current_rate) / self.topology.ticks_per_sec))
@@ -116,7 +128,15 @@ class DataTransfer(WorkFlow):
 			if self.debug: print self.env.now,self.name,"drop packet ",packet.name ,'broken link'
 		self.drop_data.append([self.topology.now(),packet.size])
 		self.packet_drop += 1
+		if self.congested:
+			return
+		self.congested = True
+		self.topology.env.process(self.do_failed(packet))
+
+	def do_failed(self, packet):
+		yield self.topology.timeout(self.topology.rtt(packet.path))
 		self.decrease()
+		self.congested = False
 
 	def plot_receive(self):
 		tick_now = int (self.topology.env.now)
@@ -146,15 +166,6 @@ class Packet:
 		self.flow = flow
 		self.hop = 0
 
-	def next_port(self, current_port):
-		if not current_port in self.path:
-			return None
-		next_port = self.path[self.path.index(current_port) + 1]
-		return next_port			
-
-	def is_last_port(self, current_port):
-		return self.path[-1] == current_port
-
 	def receive(self):
 		self.flow.receive(self)
 
@@ -180,10 +191,10 @@ class Router:
 		self.capacity=capacity
 
 	def forward(self, port_in, packet):
-		if packet.is_last_port(current_port=port_in):
+		if self.topology.is_last_port(current_port=port_in, path=packet.path):
 			packet.receive()
 			return
-		next_port = packet.next_port(current_port = port_in)
+		next_port = self.topology.next_port(current_port=port_in, path=packet.path)
 		if next_port != None:
 			if not next_port.name in port_in.links_out:
 				packet.failed(net_elem=port_in)
@@ -289,13 +300,13 @@ class Link:
 		self.port_in = None
 		self.port_out = None
 
-	def latency(self, packet):
+	def do_latency(self, packet):
 		yield self.topology.timeout(self.latency)
 		self.store.put(packet)
 
 	def put(self, packet): 
 		if (self.latency > 0):
-			self.env.process(self.latency(packet))
+			self.env.process(self.do_latency(packet))
 		else:
 			self.store.put(packet)
 	
@@ -361,6 +372,25 @@ class Topology:
 				print router_b, "does not exist"
 				return None	
 			self.add_link(router_a=r_a, router_b=r_b, capacity=capacity, latency=latency)
+
+	def rtt(self, path):
+		latency = 0
+		for port in path:
+			if self.is_last_port(current_port=port, path=path):
+				break
+			next_port = self.next_port(current_port=port, path=path)
+			link = port.links_out[next_port.name]
+			latency += link.latency
+		return latency * 2
+
+	def next_port(self, current_port, path):
+		if not current_port in path:
+			return None
+		next_port = path[path.index(current_port) + 1]
+		return next_port			
+
+	def is_last_port(self, current_port, path):
+		return path[-1] == current_port
 
 	def add_router(self, router):
 		if isinstance(router,basestring) and not router in self.all_routers:
@@ -457,8 +487,6 @@ class Topology:
 				delay_millis = delay_sec * 1000
 		if delay_millis > 0:
 			timeout = self.timeout(delay_millis)
-		#if timeout != None:
-		#	yield timeout
 		p = self.env.process(workflow.start())
 		workflow.main_process = p
 
