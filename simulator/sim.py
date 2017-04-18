@@ -38,7 +38,7 @@ class WorkFlow:
 
 
 class DataTransfer(WorkFlow):
-	def __init__(self,name,src,dst,topology,data_size,max_rate,block_size=1,path=None):
+	def __init__(self,name,src,dst,topology,data_size,max_rate,path=None,increase=None,decrease=None):
 		WorkFlow.__init__(self,topology=topology, name=name)
 		self.env = self.topology.env
 		self.data_size = data_size
@@ -48,28 +48,39 @@ class DataTransfer(WorkFlow):
 		self.packet_drop = 0
 		self.packet_total = 0
 		self.completed = False
-		self.block_size = block_size
+		self.increase = increase
+		self.increase_step = int(np.ceil(float(self.max_rate) *  0.1 / self.topology.ticks_per_sec))
+		self.current_rate = self.increase_step
 		self.start_time = self.env.now
 		self.end_time = 0
-		self.receive_data = [[0,0]]
-		self.drop_data = [[0,0]]
+		self.receive_data = []
+		self.drop_data = []
 		self.src = src
 		self.dst = dst
+		if self.increase == None:
+			self.increase = self.increase_default
+		self.decrease = decrease
+		if self.decrease == None:
+			self.decrease = self.decrease_default		
 		if self.path == None:
 			src_port = self.src.all_ports.values()[0]
 			dst_port = self.dst.all_ports.values()[0]
 			g = self.topology.get_graph()
 			self.path = nx.shortest_path(g, src_port, dst_port)
 
+	def increase_default(self):
+		self.current_rate = min (self.current_rate + self.increase_step, self.max_rate)
+
+	def decrease_default(self):
+		self.current_rate = max (self.current_rate / 2, self.increase_step)
+
 	def receive(self,packet):
 		if self.completed:
 			return
 		self.received += packet.size
-
 		if self.debug: print self.env.now,self.name,"packet received",packet.name,packet.size,self.received
-
-		self.receive_data.append([self.topology.now(),packet.size])
-
+		self.receive_data.append([self.topology.env.now,packet.size])
+		self.increase()
 		if (self.received >= self.data_size):
 			p = 100
 			if self.packet_total != 0:
@@ -86,7 +97,8 @@ class DataTransfer(WorkFlow):
 		max_rate_per_tick = int(np.ceil(float(self.max_rate) / self.topology.ticks_per_sec))
 
 		while not self.completed:
-			packet_size = min(self.block_size,self.data_size - self.received, max_rate_per_tick)
+			rate_per_tick = int(np.ceil(float(self.current_rate) / self.topology.ticks_per_sec))
+			packet_size = min(rate_per_tick,self.data_size - self.received, max_rate_per_tick)
 			packet_name = self.name+"-"+str(self.packet_total + 1)
 			packet = Packet(topology=self.topology, size=packet_size,flow=self,name=packet_name,path=self.path)
 			port_in = self.path[0]
@@ -104,9 +116,14 @@ class DataTransfer(WorkFlow):
 			if self.debug: print self.env.now,self.name,"drop packet ",packet.name ,'broken link'
 		self.drop_data.append([self.topology.now(),packet.size])
 		self.packet_drop += 1
+		self.decrease()
 
 	def plot_receive(self):
-		x,y = zip(*self.receive_data)
+		tick_now = int (self.topology.env.now)
+		y = np.full((tick_now),0, dtype=int)
+		for v in self.receive_data:
+			y[int(v[0])] = v[1]
+		x = range(tick_now)
 		plt.plot(x,y,label=self.name + "throughput")
 		plt.xlabel('milliseconds')
 		plt.ylabel('Mb')
@@ -229,39 +246,27 @@ class Port:
 		self.links_in = {}
 		self.links_out = {}		
 		self.capacity = capacity
-		self.interface = simpy.Container(env=self.topology.env,capacity=self.capacity,init=self.capacity)
-		if self.env != None:
-			self.env.process(self.release_interface())
+		self.capacity_per_tick = np.round(self.capacity / self.topology.ticks_per_sec)
 		self.router = None
 		self.topology.all_ports[self.name] = self
-
-	def release_interface(self):
-		while True:
-			amount = self.capacity - self.interface.level
-			#print self.env.now,self.name,"transmit",self.capacity-self.interface.level,'remains',self.interface.level
-			if amount > 0:
-				yield self.interface.put(amount)
-			yield self.env.timeout(1)
+		self.in_flight = 0
+		self.last_period = 0
+		self.packets_out = []
 
 	def send(self,packet,link_out):
-		if self.interface.level < packet.size:
-			packet.failed(net_elem=self)
-			return
-		self.env.process(self.do_send(packet=packet, link_out=link_out))
-		return
-
-	def do_send(self,packet,link_out):
-		#print self.env.now,self.name,"send",packet.name,packet.size,'avail capacity',self.interface.level,'drop',packet.flow.packet_drop
-		if self.interface.level < packet.size:
-			packet.failed(net_elem=self)
-			return
-		timeout = self.topology.env.timeout(1)
-		res = yield self.interface.get(packet.size) | timeout
-		if timeout in res:
-			packet.failed(net_elem=self)
-		else:
-			#print self.env.now,self.name,"send",packet.name,packet.size,'avail capacity',self.interface.level,'drop',packet.flow.packet_drop
-			link_out.put(packet)
+		if self.last_period != self.topology.env.now:
+			self.in_flight = 0
+			self.last_period = self.topology.env.now
+			for p,l in self.packets_out:
+				l.put(p)
+			self.packets_out = []
+		self.packets_out.append((packet, link_out))
+		self.in_flight += packet.size
+		while self.capacity_per_tick < self.in_flight:
+			p = self.packets_out[np.random.randint(0, len(self.packets_out))]
+			self.packets_out.remove(p)
+			self.in_flight -= p[0].size
+			p[0].failed(net_elem=self)
 
 	def __str__(self):
 		return self.name
@@ -288,8 +293,8 @@ class Link:
 		yield self.topology.timeout(self.latency)
 		self.store.put(packet)
 
-	def put(self, packet):
-		if (self.latency >0):
+	def put(self, packet): 
+		if (self.latency > 0):
 			self.env.process(self.latency(packet))
 		else:
 			self.store.put(packet)
@@ -324,7 +329,7 @@ class Endpoint(Router):
 		return self.name
 
 class Topology:
-	def __init__(self,name="Unknown",env=None,ticks_per_sec=10):
+	def __init__(self,name="Unknown",env=None,ticks_per_sec=100):
 		self.name = name
 		self.all_routers = {}
 		self.all_ports = {}
