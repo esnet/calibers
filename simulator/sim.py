@@ -91,7 +91,7 @@ class DataTransfer(WorkFlow):
 			return
 		self.received += packet.size
 		if self.debug: print self.topology.now(),self.name,"packet received",packet.name,packet.size,self.received
-		self.receive_data.append([self.topology.now(),packet.size])
+		self.receive_data.append([self.topology.now(),packet.size*self.topology.ticks_per_sec])
 		self.lastest_rtt = self.topology.rtt(packet.path)
 		if (self.received >= self.data_size):
 			self.completed = True
@@ -126,7 +126,7 @@ class DataTransfer(WorkFlow):
 			if self.debug: print self.topology.now(),self.name,"drop packet ",packet.name ,"at",net_elem.name
 		else:
 			if self.debug: print self.topology.now(),self.name,"drop packet ",packet.name ,'broken link'
-		self.drop_data.append([self.topology.now(),packet.size])
+		self.drop_data.append([self.topology.now(),packet.size*self.topology.ticks_per_sec])
 		self.packet_drop += 1
 		if self.congested:
 			return
