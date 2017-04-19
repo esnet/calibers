@@ -74,8 +74,11 @@ class DataTransfer(WorkFlow):
 	def rtt_tick(self):
 		while True:
 			yield self.topology.timeout(self.latest_rtt)
+			if self.completed:
+				return
 			if not self.congested:
 				self.increase()
+
 
 	def increase_default(self):
 		self.current_rate = min (self.current_rate + self.increase_step, self.max_rate)
@@ -289,27 +292,26 @@ class Link:
 		else:
 			self.store = simpy.Store(self.env)
 		if self.env != None:
-			self.receive = self.env.process(self.receive())
+			pass
+			#self.receive = self.env.process(self.receive())
 		self.port_in = None
 		self.port_out = None
 
 	def do_latency(self, packet):
 		yield self.topology.timeout(self.latency)
-		self.store.put(packet)
+		self.receive(packet)
 
 	def put(self, packet): 
 		if (self.latency > 0):
 			self.env.process(self.do_latency(packet))
 		else:
-			self.store.put(packet)
+			self.receive(packet)
 	
-	def receive(self):
-		while True: 
-			packet = yield self.store.get()
-			if self.port_in == None or self.port_in.router == None:
-				packet.failed(net_elem=self)
-				return
-			self.port_out.router.forward(packet=packet, port_in=self.port_out)
+	def receive(self, packet):
+		if self.port_in == None or self.port_in.router == None:
+			packet.failed(net_elem=self)
+			return
+		self.port_out.router.forward(packet=packet, port_in=self.port_out)
 
 	def __str__(self):
 		return self.name
@@ -343,6 +345,7 @@ class Topology:
 		self.env = env
 		if self.env == None:
 			 self.env = simpy.Environment()
+		self.workflows = {}
 
 	def get_router(self,name):
 		if name in self.routers:
@@ -392,7 +395,6 @@ class Topology:
 				rooter = self.all_routers[rooter]
 		router.topology = self
 		self.all_routers[router.name] = router
-
 
 	def add_link(self, router_a, router_b, capacity, latency):
 		if isinstance(router_a,basestring):
@@ -456,6 +458,7 @@ class Topology:
 		if until_sec > 0:
 			duration = until_sec * 1000
 		duration = np.ceil(duration / self.tick_millis)
+
 		print "Simulation starts at ",self.now()
 		if duration > 0:
 			self.env.run(until=self.env.now + duration)
@@ -480,6 +483,7 @@ class Topology:
 			timeout = self.timeout(delay_millis)
 		p = self.env.process(workflow.start())
 		workflow.main_process = p
+		self.workflows[workflow.name] = workflow
 
 	def get_graph(self):
 		graph = nx.Graph()
