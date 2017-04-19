@@ -6,6 +6,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import networkx as nx
 
+import time
+
 def trace(env, callback):
 	def get_wrapper(env_step, callback):
 		@wraps(env_step)
@@ -78,8 +80,18 @@ class DataTransfer(WorkFlow):
 		self.latest_rtt = self.topology.rtt(path=self.path)
 					
 	def rtt_tick(self):
+		last_info = self.topology.now()
+		last_receive = self.received
 		while True:
 			yield self.topology.timeout(self.latest_rtt)
+			if self.debug:
+				since_last = (self.topology.now() - last_receive) / 1000
+				if since_last > 10:
+					since_last - self.topology.now() 
+					rate = (self.received - last_receive) / since_last
+					last_receive = self.received
+					percent_received=(float(self.received)/self.data_size)*100
+					print "time:", self.topology.now(),"flow:",self.name,"% received:",percent_received,"speed:",rate
 			if self.completed:
 				return
 			if not self.congested:
@@ -463,13 +475,18 @@ class Topology:
 		if until_sec > 0:
 			duration = until_sec * 1000
 		duration = np.ceil(duration / self.tick_millis)
-
-		print "Simulation starts at ",self.now()
+		real_time_start = time.time()
+		simulated_time_start = self.now()
+		print "Simulation starts",self.now()
 		if duration > 0:
 			self.env.run(until=self.env.now + duration)
 		else:
 			self.env.run()
-		print "Simulation stops at",self.now()
+		real_time_stop = time.time()
+		simulated_time_stop = self.now()
+		real_time_elapse = real_time_stop - real_time_start
+		simulated_elapse = simulated_time_stop - simulated_time_start
+		print "Simulation stopped simulated elapse time:", simulated_elapse/1000,"real time:", real_time_elapse,"real/simulate:",float(real_time_elapse)*100000/simulated_elapse
 
 
 	def schedule_workflow(self, workflow, when_sec=0, when_millis=0,delay_sec=0, delay_millis=0):
