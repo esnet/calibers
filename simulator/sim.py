@@ -36,41 +36,47 @@ class WorkFlow:
 	def failed(self, packet,net_elem):
 		return
 
+	def reset(self):
+		return
+
 
 class DataTransfer(WorkFlow):
 	def __init__(self,name,src,dst,topology,data_size,max_rate,path=None,increase=None,decrease=None):
 		WorkFlow.__init__(self,topology=topology, name=name)
 		self.env = self.topology.env
 		self.data_size = data_size
-		self.received = 0
 		self.path = path
 		self.max_rate = max_rate
-		self.packet_drop = 0
-		self.packet_total = 0
-		self.completed = False
 		self.increase = increase
-		self.increase_step = int(np.ceil(float(self.max_rate) *  0.1 / self.topology.ticks_per_sec))
-		self.current_rate = self.increase_step
-		self.start_time = self.topology.now()
-		self.end_time = 0
-		self.receive_data = []
-		self.drop_data = []
 		self.src = src
-		self.dst = dst
-		self.congested = False
+		self.dst = dst	
 		if self.increase == None:
 			self.increase = self.increase_default
 		self.decrease = decrease
 		if self.decrease == None:
-			self.decrease = self.decrease_default		
+			self.decrease = self.decrease_default	
 		if self.path == None:
 			src_port = self.src.all_ports.values()[0]
 			dst_port = self.dst.all_ports.values()[0]
 			g = self.topology.get_graph()
 			self.path = nx.shortest_path(g, src_port, dst_port)
 			self.graph = g
-		self.latest_rtt = self.topology.rtt(path=self.path)
+		self.reset()
 
+	def reset(self):
+		self.received = 0
+		self.packet_drop = 0
+		self.packet_total = 0
+		self.completed = False
+		self.increase_step = int(np.ceil(float(self.max_rate) *  0.1 / self.topology.ticks_per_sec))
+		self.current_rate = self.increase_step
+		self.start_time = self.topology.now()
+		self.end_time = 0
+		self.receive_data = []
+		self.drop_data = []
+		self.congested = False		
+		self.latest_rtt = self.topology.rtt(path=self.path)
+					
 	def rtt_tick(self):
 		while True:
 			yield self.topology.timeout(self.latest_rtt)
@@ -78,7 +84,6 @@ class DataTransfer(WorkFlow):
 				return
 			if not self.congested:
 				self.increase()
-
 
 	def increase_default(self):
 		self.current_rate = min (self.current_rate + self.increase_step, self.max_rate)
@@ -98,7 +103,7 @@ class DataTransfer(WorkFlow):
 			self.end_time = self.topology.now()
 			duration = (self.end_time - self.start_time) / 1000
 			average = self.data_size / duration 
-			if self.info: print "time:",self.topology.now(),self.name,'rtt:', self.latest_rtt,'average',average,'drop',self.packet_drop
+			if self.info: print "time:",self.end_time - self.start_time,self.name,'rtt:', self.latest_rtt,'average',average,'drop',self.packet_drop
 
 	def start(self):
 		#import pdb; pdb.set_trace()
@@ -392,7 +397,7 @@ class Topology:
 		if isinstance(router,basestring) and not router in self.all_routers:
 				router = Router(name=router, topology=self)
 		else:
-				rooter = self.all_routers[rooter]
+				router = self.all_routers[router]
 		router.topology = self
 		self.all_routers[router.name] = router
 
@@ -403,7 +408,7 @@ class Topology:
 			else:
 				router = Router(name=router_a,capacity=capacity,topology=self)
 				self.all_routers[router_a] = router
-				router_a = rooter
+				router_a = router
 		else:
 			if not router_a.name in self.all_routers:
 				self.all_routers[router_a.name] = router_a
@@ -414,7 +419,7 @@ class Topology:
 			else:
 				router = Router(name=router_b,capacity=capacity,topology=self)
 				self.all_routers[router_b] = router
-				router_b = rooter
+				router_b = router
 		else:
 			if not router_b.name in self.all_routers:
 				self.all_routers[router_b.name] = router_b 
