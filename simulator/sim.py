@@ -51,14 +51,13 @@ class DataTransfer(WorkFlow):
 		self.increase = increase
 		self.increase_step = int(np.ceil(float(self.max_rate) *  0.1 / self.topology.ticks_per_sec))
 		self.current_rate = self.increase_step
-		self.start_time = self.env.now
+		self.start_time = self.topology.now()
 		self.end_time = 0
 		self.receive_data = []
 		self.drop_data = []
 		self.src = src
 		self.dst = dst
 		self.congested = False
-		self.last_rtt = 0
 		if self.increase == None:
 			self.increase = self.increase_default
 		self.decrease = decrease
@@ -88,21 +87,19 @@ class DataTransfer(WorkFlow):
 		if self.completed:
 			return
 		self.received += packet.size
-		if self.debug: print self.env.now,self.name,"packet received",packet.name,packet.size,self.received
-		self.receive_data.append([self.topology.env.now,packet.size])
+		if self.debug: print self.topology.now(),self.name,"packet received",packet.name,packet.size,self.received
+		self.receive_data.append([self.topology.now(),packet.size])
 		self.lastest_rtt = self.topology.rtt(packet.path)
 		if (self.received >= self.data_size):
-			p = 100
-			if self.packet_total != 0:
-				p = self.packet_drop*100/self.packet_total
 			self.completed = True
-			self.end_time = self.env.now
-			duration = self.start_time - self.end_time
-			if self.info: print self.env.now,self.name,'success',self.received,'packets',self.packet_total,'drop',self.packet_drop,' ',p,'%'
+			self.end_time = self.topology.now()
+			duration = (self.end_time - self.start_time) / 1000
+			average = self.data_size / duration 
+			if self.info: print "time:",self.topology.now(),self.name,'rtt:', self.latest_rtt,'average',average,'drop',self.packet_drop
 
 	def start(self):
 		#import pdb; pdb.set_trace()
-		if self.info: print self.env.now,"start file transfer",self.name
+		if self.info: print self.topology.now(),"start file transfer",self.name
 
 		max_rate_per_tick = int(np.ceil(float(self.max_rate) / self.topology.ticks_per_sec))
 
@@ -123,9 +120,9 @@ class DataTransfer(WorkFlow):
 		if self.completed:
 			return
 		if net_elem != None:
-			if self.debug: print self.env.now,self.name,"drop packet ",packet.name ,"at",net_elem.name
+			if self.debug: print self.topology.now(),self.name,"drop packet ",packet.name ,"at",net_elem.name
 		else:
-			if self.debug: print self.env.now,self.name,"drop packet ",packet.name ,'broken link'
+			if self.debug: print self.topology.now(),self.name,"drop packet ",packet.name ,'broken link'
 		self.drop_data.append([self.topology.now(),packet.size])
 		self.packet_drop += 1
 		if self.congested:
@@ -139,14 +136,10 @@ class DataTransfer(WorkFlow):
 		self.congested = False
 
 	def plot_receive(self):
-		tick_now = int (self.topology.env.now)
-		y = np.full((tick_now),0, dtype=int)
-		for v in self.receive_data:
-			y[int(v[0])] = v[1]
-		x = range(tick_now)
+		x,y = zip(*self.receive_data)
 		plt.plot(x,y,label=self.name + "throughput")
 		plt.xlabel('milliseconds')
-		plt.ylabel('Mb')
+		plt.ylabel('Mbps')
 
 	def plot_drop(self):
 		x,y = zip(*self.drop_data)
@@ -463,15 +456,13 @@ class Topology:
 		if until_sec > 0:
 			duration = until_sec * 1000
 		duration = np.ceil(duration / self.tick_millis)
-		print "Simulation starts at ",self.env.now, "and will run until ", self.env.now + duration
+		print "Simulation starts at ",self.now()
 		if duration > 0:
 			self.env.run(until=self.env.now + duration)
 		else:
 			self.env.run()
-		print "Simulation stops at",self.env.now
+		print "Simulation stops at",self.now()
 
-	def stop_simulation(self):
-		self.env.run(until=self.env.now +1)
 
 	def schedule_workflow(self, workflow, when_sec=0, when_millis=0,delay_sec=0, delay_millis=0):
 		timeout = None
