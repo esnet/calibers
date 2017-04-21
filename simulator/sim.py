@@ -43,7 +43,7 @@ class WorkFlow:
 
 
 class DataTransfer(WorkFlow):
-	def __init__(self,name,src,dst,topology,data_size,max_rate,path=None,increase=None,decrease=None):
+	def __init__(self,name,src,dst,topology,data_size,max_rate,path=None,increase=None,decrease=None,tick_rtt=False):
 		WorkFlow.__init__(self,topology=topology, name=name)
 		self.env = self.topology.env
 		self.data_size = data_size
@@ -63,7 +63,12 @@ class DataTransfer(WorkFlow):
 			g = self.topology.get_graph()
 			self.path = nx.shortest_path(g, src_port, dst_port)
 			self.graph = g
+		self.tick_rtt = tick_rtt
+		self.rtt = self.topology.rtt(self.path)
 		self.reset()
+		self.record_receive = False
+		self.record_drop = False
+		self.topology.env.process(self.rtt_tick())
 
 	def reset(self):
 		self.received = 0
@@ -76,14 +81,24 @@ class DataTransfer(WorkFlow):
 		self.end_time = 0
 		self.receive_data = []
 		self.drop_data = []
-		self.congested = False		
-		self.latest_rtt = self.topology.rtt(path=self.path)
+		self.recourd_drop = False
+		self.congested = False	
+		self.ticks_per_sec = self.topology.ticks_per_sec 
+		self.tick_duration = self.topology.tick_millis
+		if self.tick_rtt:
+			self.tick_duration = self.rtt
+			self.ticks_per_sec = int(np.ceil(float(1000)/self.tick_rtt))
+		self.ticks_per_sec = max (self.ticks_per_sec,1)
+		self.tick_duration = max (self.tick_duration, self.topology.tick_millis)
+		self.max_rate_per_tick = int(np.ceil(float(self.max_rate) / self.ticks_per_sec))
+		self.rate_per_tick = int(np.ceil(float(self.current_rate) / self.ticks_per_sec))
+		self.free_packets=[]	
 					
 	def rtt_tick(self):
 		last_info = self.topology.now()
 		last_receive = self.received
 		while True:
-			yield self.topology.timeout(self.latest_rtt)
+			yield self.topology.timeout(self.rtt)
 			if self.debug:
 				since_last = (self.topology.now() - last_receive) / 1000
 				if since_last > 10:
@@ -98,86 +113,120 @@ class DataTransfer(WorkFlow):
 				self.increase()
 
 	def increase_default(self):
-		self.current_rate = min (self.current_rate + self.increase_step, self.max_rate)
+		rate = min (self.current_rate + self.increase_step, self.max_rate)
+		if rate != self.current_rate:
+			self.current_rate = rate
+			self.rate_per_tick = int(np.ceil(float(self.current_rate) / self.ticks_per_sec))
 
 	def decrease_default(self):
-		self.current_rate = max (self.current_rate / 2, self.increase_step)
+		rate = max (self.current_rate / 2, self.increase_step)
+		if rate != self.current_rate:
+			self.current_rate = rate
+			self.rate_per_tick = int(np.ceil(float(self.current_rate) / self.ticks_per_sec))
+
+	def computes_stats(self):
+			current_time = self.end_time
+			if not self.completed:
+				current_time = self.topology.now()
+			self.elapse_time = (current_time - self.start_time) / 1000
+			self.average = self.data_size / self.elapse_time		
 
 	def receive(self,packet):
+		self.free_packets.append(packet)
 		if self.completed:
 			return
 		self.received += packet.size
 		if self.debug: print self.topology.now(),self.name,"packet received",packet.name,packet.size,self.received
-		self.receive_data.append([self.topology.now(),packet.size*self.topology.ticks_per_sec])
-		self.lastest_rtt = self.topology.rtt(packet.path)
+		if self.record_receive: self.receive_data.append([self.topology.now(),packet.size*self.topology.ticks_per_sec])
 		if (self.received >= self.data_size):
 			self.completed = True
 			self.end_time = self.topology.now()
-			duration = (self.end_time - self.start_time) / 1000
-			average = self.data_size / duration 
-			if self.info: print "time:",self.end_time - self.start_time,self.name,'rtt:', self.latest_rtt,'average',average,'drop',self.packet_drop
+			self.computes_stats()
+			if self.info: print "time:",self.elapse_time,'secs',self.name,'rtt:', self.rtt,'average',self.average,'drop',self.packet_drop
 
 	def start(self):
 		#import pdb; pdb.set_trace()
+		self.reset()
 		if self.info: print self.topology.now(),"start file transfer",self.name
-
-		max_rate_per_tick = int(np.ceil(float(self.max_rate) / self.topology.ticks_per_sec))
-
-		self.topology.env.process(self.rtt_tick())
-
+		self.free_packets=[]
 		while not self.completed:
-			rate_per_tick = int(np.ceil(float(self.current_rate) / self.topology.ticks_per_sec))
-			packet_size = min(rate_per_tick,self.data_size - self.received, max_rate_per_tick)
+			packet_size = min(self.rate_per_tick,self.data_size - self.received, self.max_rate_per_tick)
 			packet_name = self.name+"-"+str(self.packet_total + 1)
-			packet = Packet(topology=self.topology, size=packet_size,flow=self,name=packet_name,path=self.path)
+			packet = None
+			if len(self.free_packets) > 0:
+				packet = self.free_packets[0]
+				self.free_packets.remove(packet)
+				packet.size = packet_size
+				packet.name = packet_name
+			else:
+				packet = Packet(topology=self.topology, size=packet_size,flow=self,name=packet_name,path=self.path)
 			port_in = self.path[0]
 			port_in.router.forward(packet=packet, port_in=port_in)	
 			self.packet_total += 1
-			yield self.topology.env.timeout(1)
+			yield self.topology.timeout(self.tick_duration)
 
 
 	def failed(self, packet,net_elem):
+
 		if self.completed:
+			self.free_packets.append(packet)
 			return
 		if net_elem != None:
 			if self.debug: print self.topology.now(),self.name,"drop packet ",packet.name ,"at",net_elem.name
 		else:
 			if self.debug: print self.topology.now(),self.name,"drop packet ",packet.name ,'broken link'
-		self.drop_data.append([self.topology.now(),packet.size*self.topology.ticks_per_sec])
+		if self.record_drop:
+			self.drop_data.append([self.topology.now(),packet.size*self.topology.ticks_per_sec])
 		self.packet_drop += 1
 		if self.congested:
+			self.free_packets.append(packet)
 			return
 		self.congested = True
 		self.topology.env.process(self.do_failed(packet))
 
 	def do_failed(self, packet):
-		yield self.topology.timeout(self.topology.rtt(packet.path))
+		yield self.topology.timeout(self.rtt)
 		self.decrease()
 		self.congested = False
+		self.free_packets.append(packet)
 
 	def plot_receive(self):
 		x,y = zip(*self.receive_data)
-		plt.plot(x,y,label=self.name + "throughput")
+		plt.plot(x,y,label=self.name)
+		plt.plot(x,y)
 		plt.xlabel('milliseconds')
 		plt.ylabel('Mbps')
 
 	def plot_drop(self):
 		x,y = zip(*self.drop_data)
 		plt.plot(x,y,label=self.name + "drop")
-		#plt.plot(self.throughput_data,self.drop_data)
 		plt.xlabel('milliseconds')
-		plt.ylabel('Mb')
+		plt.ylabel('Nb of drops')
 
 
 class Packet:
-	def __init__ (self,topology,name,size,flow,path=[]):
+	def __init__ (self,topology,name,size,flow,forward_map=None,path=[]):
 		self.topology = topology
 		self.env = topology.env
 		self.name = name
 		self.size = size
 		self.path = path
 		self.flow = flow
-		self.hop = 0
+		if forward_map != None:
+			self.forward_map = forward_map
+		else:
+			self.forward_map = self.compute_map()
+
+	def compute_map(self,path=None):
+		forward_map = {}
+		if path == None:
+			path = self.path
+		for port in path:
+			if self.topology.is_last_port(current_port=port, path=path):
+				forward_map[port.name] = None
+			else:
+				forward_map[port.name] = self.topology.next_port(current_port=port, path=path)
+		return forward_map
 
 	def receive(self):
 		self.flow.receive(self)
@@ -204,18 +253,16 @@ class Router:
 		self.capacity=capacity
 
 	def forward(self, port_in, packet):
-		if self.topology.is_last_port(current_port=port_in, path=packet.path):
+		next_port = packet.forward_map[port_in.name]
+		if next_port == None:
 			packet.receive()
 			return
-		next_port = self.topology.next_port(current_port=port_in, path=packet.path)
-		if next_port != None:
-			if not next_port.name in port_in.links_out:
-				packet.failed(net_elem=port_in)
-				return
-			link = port_in.links_out[next_port.name]
-			port_in.send(packet=packet, link_out=link)
-		else:
+		if not next_port.name in port_in.links_out:
 			packet.failed(net_elem=port_in)
+			return
+		link = port_in.links_out[next_port.name]
+		port_in.send(packet=packet, link_out=link)
+
 
 	def add_port(self,port=None,name=None,capacity=None):
 		if port == None:
@@ -468,6 +515,13 @@ class Topology:
 	def now(self):
 		return self.env.now * self.tick_millis
 
+	def sim_rate(self):
+		real_time_stop = time.time()
+		simulated_time_stop = self.now()
+		real_time_elapse = real_time_stop - self.real_time_start
+		simulated_elapse = simulated_time_stop - self.simulated_time_start
+		return simulated_elapse, real_time_elapse,float(simulated_elapse)/(real_time_elapse*1000)
+
 	def start_simulation(self, until_sec=0, until_millis=0):
 		duration = 0
 		if until_millis > 0:
@@ -475,18 +529,15 @@ class Topology:
 		if until_sec > 0:
 			duration = until_sec * 1000
 		duration = np.ceil(duration / self.tick_millis)
-		real_time_start = time.time()
-		simulated_time_start = self.now()
+		self.real_time_start = time.time()
+		self.simulated_time_start = self.now()
 		print "Simulation starts",self.now()
 		if duration > 0:
 			self.env.run(until=self.env.now + duration)
 		else:
 			self.env.run()
-		real_time_stop = time.time()
-		simulated_time_stop = self.now()
-		real_time_elapse = real_time_stop - real_time_start
-		simulated_elapse = simulated_time_stop - simulated_time_start
-		print "Simulation stopped simulated elapse time:", simulated_elapse/1000,"real time:", real_time_elapse,"real/simulate:",float(real_time_elapse)*100000/simulated_elapse
+		simulated_elapse,real_time_elapse,rate = self.sim_rate()
+		print "Simulation stopped simulated elapse time:", simulated_elapse/1000,"real time:", real_time_elapse,"real/simulate:",rate
 
 
 	def schedule_workflow(self, workflow, when_sec=0, when_millis=0,delay_sec=0, delay_millis=0):
