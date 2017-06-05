@@ -1,8 +1,9 @@
 from functools import partial, wraps
-import simpy
+import simpy 
 
-import matplotlib
+
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
 import networkx as nx
 
@@ -27,6 +28,19 @@ class WorkFlow:
 	def reset(self):
 		return
 
+def increase_default(flow):
+	rate = min (flow.current_rate + flow.increase_step, flow.max_rate)
+	if rate != flow.current_rate:
+		flow.current_rate = rate
+		return True
+	return False
+
+def decrease_default(flow):
+	rate = max (flow.current_rate / 2, flow.increase_step)
+	if rate != flow.current_rate:
+		flow.current_rate = rate
+		return True
+	return False
 
 class DataTransfer(WorkFlow):
 	def __init__(self,name,src,dst,topology,data_size,max_rate,path=None,increase=None,decrease=None,debug=None,):
@@ -43,10 +57,10 @@ class DataTransfer(WorkFlow):
 		self.src = src
 		self.dst = dst	
 		if self.increase == None:
-			self.increase = self.increase_default
+			self.increase = increase_default
 		self.decrease = decrease
 		if self.decrease == None:
-			self.decrease = self.decrease_default	
+			self.decrease = decrease_default	
 		if path == None:
 			src_port = self.src.all_ports.values()[0]
 			dst_port = self.dst.all_ports.values()[0]
@@ -86,20 +100,6 @@ class DataTransfer(WorkFlow):
 		return forward_map	
 					
 
-	def increase_default(self):
-		rate = min (self.current_rate + self.increase_step, self.max_rate)
-		if rate != self.current_rate:
-			self.current_rate = rate
-			return True
-		return False
-
-	def decrease_default(self):
-		rate = max (self.current_rate / 2, self.increase_step)
-		if rate != self.current_rate:
-			self.current_rate = rate
-			return True
-		return False
-
 	def computes_stats(self):
 			current_time = self.end_time
 			if not self.completed:
@@ -108,19 +108,9 @@ class DataTransfer(WorkFlow):
 			self.average = self.data_size / self.elapse_time		
 
 	def flowrate_change(self, flowrate):
-		if flowrate.congested: return
-		now = self.topology.now()
-		if self.debug or self.topology.debug: print now,"flow:",self.name,"rate change from:",self.receive_rate,"to:",flowrate.rate
-		if flowrate.rate == 0:
-			self.receive_rate = 0
-			self.congested = True
-		else:
-			if self.completed:
-				self.congested = False
-		if flowrate.reset_congestion: self.congested = False
-		if not self.congested:
-			self.receive_rate = flowrate.rate
+		if self.debug or self.topology.debug: print self.topology.now(),"flow:",self.name,"rate change from:",self.receive_rate,"to:",flowrate.rate
 		self.update_stats()
+		self.receive_rate = flowrate.rate
 
 	def compute_map(self,path=None):
 		forward_map = {}
@@ -139,7 +129,7 @@ class DataTransfer(WorkFlow):
 		update = int(float(self.receive_rate/1000) * elapsed)
 		self.received += update
 		self.last_receive_update = now
-		# if self.debug or self.topology.debug: print self.topology.now(),"flow:",self.name,"receive update", update
+		#if self.debug or self.topology.debug: print self.topology.now(),"flow:",self.name,"receive update", update
 		if self.record_receive: self.receive_data.append([float(now)/1000,self.receive_rate])
 
 	def start(self):
@@ -148,23 +138,21 @@ class DataTransfer(WorkFlow):
 			for port in self.path:
 				port.record_drop = True
 		if self.info: print self.topology.now(),"start file transfer",self.name
-		port_in = self.path[0]
-		# start the flow
-		flowrate = FlowRate(flow=self,rate = self.current_rate)
-		port_in.router.flowrate_change(flowrate=flowrate, port_in=port_in)	
-		while self.received <= self.data_size:
-			yield self.topology.timeout(self.rtt)	
+		port_in = self.path[0]	
+		while self.received <= self.data_size:	
 			self.update_stats()
-			if self.debug or self.topology.debug: print self.topology.now(),"flow:",self.name,"received:",self.received,"receive rate",self.receive_rate,"loss",self.congested
-			if self.receive_rate == self.current_rate:
-				if self.increase():
+			if self.debug or self.topology.debug: print self.topology.now(),"flow:",self.name,"received:",self.received,"sending rate",self.current_rate,"congested",self.congested
+			if self.congested:
+				if self.decrease(flow=self):
 					flowrate = FlowRate(flow=self,rate = self.current_rate)
-					port_in.router.flowrate_change(flowrate=flowrate, port_in=port_in) 
-			if self.receive_rate == 0:
-				self.decrease()
-				flowrate = FlowRate(flow=self,rate = self.current_rate)
-				flowrate.reset_congestion = True
-				port_in.router.flowrate_change(flowrate=flowrate, port_in=port_in) 
+					port_in.router.flowrate_change(flowrate=flowrate, port_in=port_in)
+			if not self.congested:
+				if self.increase(flow=self):
+					flowrate = FlowRate(flow=self,rate = self.current_rate)
+					port_in.router.flowrate_change(flowrate=flowrate, port_in=port_in)
+			yield self.topology.timeout(self.rtt)
+
+				 
 		self.completed = True
 		self.end_time = self.topology.now()
 		self.computes_stats()
@@ -200,8 +188,6 @@ class FlowRate:
 	def __init__(self, flow, rate=0):
 		self.flow = flow
 		self.rate = rate
-		self.reset_congestion = False
-		self.congested = False
 
 	def __str__(self):
 		return self.flow.name+':'+str(self.rate)
@@ -221,7 +207,6 @@ class Router:
 		self.debug = False or self.topology.debug
 
 	def flowrate_change(self, port_in, flowrate):
-		if flowrate.congested: return
 		if self.debug or self.topology.debug: print self.topology.now(),"router:",self.name,"flow:",flowrate.flow.name,"port_in:",port_in,"rate change to:",flowrate.rate
 		next_port = flowrate.flow.forward_map[port_in.name]
 		if next_port == None:
@@ -293,6 +278,8 @@ class Port:
 		self.debug = False or self.topology.debug
 		self.record_drop = True
 		self.drops = []
+		self.debug = False
+		self.congested = False
 
 	def total_flowrates(self):
 		total = 0
@@ -306,51 +293,28 @@ class Port:
 		return total
 
 	def flowrate_change(self, flowrate):
-		if flowrate.congested: return
 		if flowrate.flow.completed:
 			#left over. ignore
 			if flowrate.flow.name in self.flowrates:
 				del self.flowrates[flowrate.flow.name]
 			return
-		if self.debug or self.topology.debug:
-			print self.topology.now(),"port:",self.name,"port","flow:",flowrate.flow.name,"change rate to",flowrate.rate
 		flow = flowrate.flow
 		self.flowrates[flow.name] = flowrate
-		self.router.flowrate_change(flowrate=flowrate,port_in=self)
-		# Did the change caused congestion ?
+		if self.debug or self.topology.debug:
+			print self.topology.now(),"port:",self.name,"total rate",flow.current_rate,"flow:",flowrate.flow.name,"change rate to",flowrate.rate
 		if self.total_flowrates() > self.capacity:
-			self.drop_flows()
+			self.congested = True
+			#print "port",self.name,"is congested",self.total_flowrates()
+			for rate in self.flowrates.values():
+				rate.flow.congested = True
+		else:
+			if self.congested:
+				self.congested = False
+				#print "port",self.name,"is no longer congested",self.total_flowrates()
+				for rate in self.flowrates.values():
+					rate.flow.congested = False
 
-	def drop_flows(self):
-		dropped = []
-		current_total = self.total_flowrates() 
-		total_drop = 0
-		if self.debug or self.topology.debug: print self.topology.now(),"port",self.name,"congested"
-		while current_total > self.capacity:
-			i = np.random.randint(0, len(self.flowrates))
-			flowrate = self.flowrates.values()[i]
-			if flowrate.flow.name in dropped:
-				continue
-			dropped_flowrate = FlowRate(flow=flowrate.flow,rate=0)
-			self.router.flowrate_change(port_in=self, flowrate=dropped_flowrate)
-			dropped.append(flowrate.flow.name)
-			current_total -= flowrate.rate
-			if self.record_drop: total_drop += flowrate.rate
-			flowrate.congested = True
-		# Restore inital rate after the 0 rate changes were sent
-		# self.topology.env.process(self.restore_flowrates(dropped=dropped))
-		if self.record_drop: self.drops.append([float(self.topology.now())/1000, total_drop])
-
-	def restore_flowrates(self, dropped):
-		yield self.topology.env.timeout(1)
-		# restore flows that have previously been dropped
-		for flow_name in dropped:
-			if flow_name in self.flowrates:
-				flowrate = self.flowrates[flow_name]
-				if flowrate.flow.completed:
-					continue
-				self.router.flowrate_change(port_in=self, flowrate=flowrate)
-				
+		self.router.flowrate_change(flowrate=flowrate,port_in=self)			
 
 	def __str__(self):
 		return self.name
@@ -376,7 +340,6 @@ class Link:
 		self.receive_flowrate_change(flowrate)
 
 	def flowrate_change(self, flowrate): 
-		if flowrate.congested: return
 		if self.debug or self.topology.debug: print self.topology.now(),"link:",self.name,"flow:",flowrate.flow.name,"change ate to:",flowrate.rate
 		if (self.latency > 0):
 			self.env.process(self.do_latency(flowrate))
@@ -419,7 +382,7 @@ class Topology:
 		self.all_routers = {}
 		self.all_ports = {}
 		self.all_links = {} 
-		self.tick_millis = np.round(1000 / ticks_per_sec)
+		self.tick_millis = round(1000 / ticks_per_sec)
 		self.ticks_per_sec = ticks_per_sec
 		self.env = env
 		if self.env == None:
