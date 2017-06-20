@@ -76,7 +76,7 @@ class DataTransfer(WorkFlow):
 	def reset(self):
 		self.received = 0
 		self.completed = False
-		self.increase_step = int(np.ceil(float(self.max_rate) *  0.1))
+		self.increase_step = np.ceil(float(self.max_rate) *  0.01)
 		self.current_rate = self.increase_step
 		self.start_time = self.topology.now()
 		self.end_time = 0
@@ -152,7 +152,8 @@ class DataTransfer(WorkFlow):
 					port_in.router.flowrate_change(flowrate=flowrate, port_in=port_in)
 			yield self.topology.timeout(self.rtt)
 
-				 
+		flowrate = FlowRate(flow=self,rate = 0)	
+		port_in.router.flowrate_change(flowrate=flowrate, port_in=port_in)	 
 		self.completed = True
 		self.end_time = self.topology.now()
 		self.computes_stats()
@@ -293,15 +294,15 @@ class Port:
 		return total
 
 	def flowrate_change(self, flowrate):
-		if flowrate.flow.completed:
+		flow = flowrate.flow
+		if flowrate.flow.completed or flowrate.rate == 0:
 			#left over. ignore
 			if flowrate.flow.name in self.flowrates:
 				del self.flowrates[flowrate.flow.name]
-			return
-		flow = flowrate.flow
-		self.flowrates[flow.name] = flowrate
-		if self.debug or self.topology.debug:
-			print self.topology.now(),"port:",self.name,"total rate",flow.current_rate,"flow:",flowrate.flow.name,"change rate to",flowrate.rate
+		else:
+			self.flowrates[flow.name] = flowrate
+			if self.debug or self.topology.debug:
+				print self.topology.now(),"port:",self.name,"total rate",flow.current_rate,"flow:",flowrate.flow.name,"change rate to",flowrate.rate
 		if self.total_flowrates() > self.capacity:
 			self.congested = True
 			#print "port",self.name,"is congested",self.total_flowrates()
