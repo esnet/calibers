@@ -72,6 +72,8 @@ class DataTransfer(WorkFlow):
 		self.reset()
 		self.record_receive = False
 		self.record_drop = False 
+		self.record_congestion = False
+		self.congestion_rate_loss = 20
 
 	def reset(self):
 		self.received = 0
@@ -87,6 +89,7 @@ class DataTransfer(WorkFlow):
 		self.last_receive_update = self.topology.now()
 		self.flowrates = []
 		self.receive_rate = 0
+		self.congestion_data = []
 
 	def compute_map(self,path=None):
 		forward_map = {}
@@ -98,7 +101,14 @@ class DataTransfer(WorkFlow):
 			else:
 				forward_map[port.name] = self.topology.next_port(current_port=port, path=path)
 		return forward_map	
-					
+
+	def congestion(self,status):
+		now = self.topology.now()
+		if self.record_congestion: self.congestion_data.append([float(now)/1000, int(status)])
+		if status and not self.congested:
+			self.update_stats()
+		self.congested = status
+				
 
 	def computes_stats(self):
 			current_time = self.end_time
@@ -126,11 +136,14 @@ class DataTransfer(WorkFlow):
 	def update_stats(self):
 		now = self.topology.now()
 		elapsed = now - self.last_receive_update
-		update = int(float(self.receive_rate/1000) * elapsed)
+		rate = self.receive_rate
+		if self.congested:
+			rate = rate / self.congestion_rate_loss
+		update = int(float(rate/1000) * elapsed)
 		self.received += update
 		self.last_receive_update = now
-		#if self.debug or self.topology.debug: print self.topology.now(),"flow:",self.name,"receive update", update
-		if self.record_receive: self.receive_data.append([float(now)/1000,self.receive_rate])
+		if self.debug or self.topology.debug: print self.topology.now()/1000,"flow:",self.name,"rate:",rate,"congested",self.congested,self.receive_rate
+		if self.record_receive: self.receive_data.append([float(now)/1000,rate])
 
 	def start(self):
 		self.reset()
@@ -311,13 +324,13 @@ class Port:
 			self.congested = True
 			#print "port",self.name,"is congested",self.total_flowrates()
 			for rate in self.flowrates.values():
-				rate.flow.congested = True
+				rate.flow.congestion (status=True)
 		else:
 			if self.congested:
 				self.congested = False
 				#print "port",self.name,"is no longer congested",self.total_flowrates()
 				for rate in self.flowrates.values():
-					rate.flow.congested = False
+					rate.flow.congestion(status=False)
 
 		self.router.flowrate_change(flowrate=flowrate,port_in=self)			
 
