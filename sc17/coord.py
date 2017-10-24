@@ -3,13 +3,20 @@ import threading
 from datetime import datetime
 
 class Switch:
-    def __init__(self, name, ip, port, vfc, ofport, rtt):
+    def __init__(self, name, ip, port, vfc, ofport, rtt, cert_file=None):
         self.name = name
         self.ip = ip
         self.port = port
         self.vfc = vfc
         self.ofport = ofport
         self.rtt = rtt
+        self.cert_file = cert_file
+        if self.cert_file != None:
+        	f = open(self.cert_file)
+        	self.cert = f.read()
+        	f.close()
+        else:
+        	self.cert None
 
     def __str__(self):
     	return self.name
@@ -18,10 +25,12 @@ class Switch:
        
 
 class Container:
-    def __init__(self, name, ip, port):
+    def __init__(self, name, ip, port, bias_fun=None, bias_args=None):
         self.name = name
         self.ip = ip
         self.port = port
+        self.bias_fun = bias_fun
+        self.bias_args = bias_args
 
     def __str__(self):
     	return self.name
@@ -95,7 +104,7 @@ class Request:
 
 
 class Coordinator:
-	def __init__ (self, name, config_file, epoch_time):
+	def __init__ (self, name, config_file, epoch_time, ):
 		self.config_file = config_file
 		self.epoch_time = epoch_time
 		self.accepted_requests = []
