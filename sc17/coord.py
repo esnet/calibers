@@ -1,4 +1,6 @@
 import pickle
+import threading
+from datetime import datetime
 
 class Switch:
     def __init__(self, name, ip, port, vfc, ofport, rtt):
@@ -51,9 +53,69 @@ class Config:
         pickle.dump(obj=self,file=f)
         f.close()
 
+
 def get_config(config_file):
 	f = open(config_file)
 	conf = pickle.load(f)
 	f.close()
 	return conf
-        
+
+class Request:
+	def __init__ (self, src_dtn, dst_dtn, data_size, max_rate, deadline_datetime, description=""):
+		self.src_dtn = src_dtn
+		self.dst_dtn = dst_dtn
+		self.max_rate = max_rate
+		self.deadline = deadline
+		self.received_datetime = datetime.now()
+		self.deadline_datetime = deadline_datetime
+		self.accepted = False
+		self.start_time = None
+		self.percent_completion = 0
+		self.completed = False
+		self.completed_ontime = False
+		self.description = description
+		self.coordinator = None
+
+		def accepted(self):
+			pass
+
+		def rejected(self):
+			pass
+
+		def completed(self):
+			pass
+
+		def started(self):
+			pass
+
+	def __str__(self):
+		return self.description + ": " + self.src_dtn + " -> " + self.dst_dtn + " completion: " + self.percent_completion
+	def __repr__(self):
+		return self.__str__()
+
+
+class Coordinator:
+	def __init__ (self, name, config_file, epoch_time):
+		self.config_file = config_file
+		self.epoch_time = epoch_time
+		self.accepted_requests = []
+		self.rejected_request = []
+		self.completed_requests = []
+		self.pending_requests = []
+		self.lock = threading.Lock()
+
+	def request_transfer (self, request):
+		request.coordinator = self
+		with self.lock:
+			self.pending_requests.append(request)
+
+	def request_completed (self, request):
+		pass
+
+
+
+
+
+
+
+
