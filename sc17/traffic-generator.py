@@ -52,9 +52,7 @@ C = 10000 #10 Mbps
 epoch = 1
 gen = traffic_gen(sources,C,epoch)
 
-sched = 'new-global' #sys.argv[2]
 algo = 'ljf' ##sys.argv[3]
-ver = '1' #sys.argv[4]
 s = scheduler.Scheduler(epoch,algo,debug=False)
 
 

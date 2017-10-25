@@ -5,7 +5,6 @@ import time
 import random
 from math import *
 import numpy as np
-from core import flow, Link, Topology, Request
 
 epoch = 100.0 #300.0 #1 #timeslot, periodic sceduling, unit seconds
 C = int(10000 * 1e6) #link capaacity in bps
@@ -191,9 +190,8 @@ class Scheduler:
             if(Rresid < new_f.Rmin):
                 self.pace(new_f)
             else:
-                self.new_flows_temp[new_f.flow_id] = (new_f.src,new_f.Ralloc)
-                #self.new_flows.append((new_f.src,new_f.Ralloc))
                 new_f.set_rate(Rresid,self.t_now)
+                self.new_flows_temp[new_f.flow_id] = (new_f.src,new_f.Ralloc)
                 self.flows[new_f.flow_id] = new_f
                 
                 if self.debug == True:
@@ -203,7 +201,7 @@ class Scheduler:
 
         for f in self.updated_flows_temp:
             if f in self.new_flows_temp:
-                self.new_flows_temp[f] = self.updated_flows_temp[f]
+                self.new_flows_temp[f] = self.updated_flows_temp[f] 
             else:
                 prev_Ralloc = self.original_flows_info[f].Ralloc
                 src,new_Ralloc = self.updated_flows_temp[f]
