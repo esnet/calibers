@@ -16,7 +16,7 @@ class Switch:
         	self.cert = f.read()
         	f.close()
         else:
-        	self.cert None
+        	self.cert - None
 
     def __str__(self):
     	return self.name
