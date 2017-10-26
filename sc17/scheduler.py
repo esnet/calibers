@@ -5,7 +5,6 @@ import time
 import random
 from math import *
 import numpy as np
-from coord import BaseRequest
 
 epoch = 100.0 #300.0 #1 #timeslot, periodic sceduling, unit seconds
 C = int(10000 * 1e6) #link capaacity in bps
@@ -266,7 +265,8 @@ class Request:
         self.td = td # deadline in seconds
         self.src = src
         self.dst = dst
+        self.min_duration = 0
     def __str__(self):
-        return "src= "+self.src+" dst: "+str(self.dst)+" size: "+str(self.size)+" deadline: "+str(self.td)
+        return "src= "+self.src+" dst: "+str(self.dst)+" size: "+str(self.size)+" deadline: "+str(self.td)+" min_duration: "+self.min_duration
     def __repr__(self):
         return self.__str__()

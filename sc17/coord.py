@@ -144,11 +144,11 @@ class SingleFileGen:
     	requests = []
     	for src in self.nodes:
             size = np.random.choice(self.buckets)
-            min_duration = (size * 8 * self.padding) / self.capacity 
-            print size,min_duration
+            min_duration = (size * 8 * 1000 * self.padding) / self.capacity 
             duration = min_duration * (np.random.exponential(scale=1)) + min_duration
             dst = 0
             req = scheduler.Request(src,dst,size,0,duration)
+            req.min_duration = min_duration
             requests.append(req)
         return requests
 
