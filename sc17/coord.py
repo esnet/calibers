@@ -19,7 +19,7 @@ class Switch:
         	self.cert = f.read()
         	f.close()
         else:
-        	self.cert - None
+        	self.cert = None
 
     def __str__(self):
     	return self.name
@@ -109,7 +109,7 @@ class CoordRequest:
 
 
 class Coordinator:
-	def __init__ (self, name, config_file, epoch_time, ):
+	def __init__ (self, name, config_file, epoch_time ):
 		self.config_file = config_file
 		self.epoch_time = epoch_time
 		self.accepted_requests = []
@@ -145,7 +145,7 @@ class SingleFileGen:
     	for src in self.nodes:
             size = np.random.choice(self.buckets)
             min_duration = (size * 8 * 1000 * self.padding) / self.capacity 
-            duration = min_duration * (np.random.exponential(scale=1)) + min_duration
+            duration = min_duration * (np.random.exponential(scale=20)) + min_duration
             dst = 0
             req = scheduler.Request(src,dst,size,0,duration)
             req.min_duration = min_duration
