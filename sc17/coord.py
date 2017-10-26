@@ -96,6 +96,8 @@ class Request:
 
 		def started(self):
 			pass
+		def updated(self):
+			pass
 
 	def __str__(self):
 		return self.description + ": " + self.src_dtn + " -> " + self.dst_dtn + " completion: " + self.percent_completion
