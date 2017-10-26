@@ -1,6 +1,9 @@
 import pickle
 import threading
 from datetime import datetime
+import numpy as np
+
+import scheduler
 
 class Switch:
     def __init__(self, name, ip, port, vfc, ofport, rtt, cert_file=None):
@@ -69,7 +72,7 @@ def get_config(config_file):
 	f.close()
 	return conf
 
-class Request:
+class CoordRequest:
 	def __init__ (self, src_dtn, dst_dtn, data_size, max_rate, deadline_datetime, description=""):
 		self.src_dtn = src_dtn
 		self.dst_dtn = dst_dtn
@@ -122,6 +125,32 @@ class Coordinator:
 
 	def request_completed (self, request):
 		pass
+
+
+
+class SingleFileGen:
+
+    def __init__(self,sources,C,epoch,buckets,padding=1.2):
+        self.capacity = C
+        self.epoch = epoch
+        self.nodes = sources
+        self.buckets=buckets
+        self.padding = padding
+        np.random.seed(3)
+
+
+    def generate_requests(self):
+
+    	requests = []
+    	for src in self.nodes:
+            size = np.random.choice(self.buckets)
+            min_duration = (size * 8 * self.padding) / self.capacity 
+            print size,min_duration
+            duration = min_duration * (np.random.exponential(scale=1)) + min_duration
+            dst = 0
+            req = scheduler.Request(src,dst,size,0,duration)
+            requests.append(req)
+        return requests
 
 
 

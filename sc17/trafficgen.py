@@ -26,14 +26,14 @@ class traffic_gen:
         
         inter_arrival = np.random.exponential(arriv_rate)
         absolute_sum = absolute_sum + inter_arrival
-        while absolute_sum <= epoch: #(t_now+1)*epoch:
+        while absolute_sum <= self.epoch: #(t_now+1)*epoch:
             self.tot_req = self.tot_req + 1
             td = int(np.random.exponential(td_lambda))
-            while td < epoch: 
+            while td < self.epoch: 
                 td = int(np.random.exponential(td_lambda))
             avg_rate = np.random.exponential(s_lambda)
             size = (avg_rate * td) / 8 #unit MB
-            while size < 1 or size*8/td > C:
+            while size < 1 or size*8/td > self.C:
                 avg_rate = np.random.exponential(s_lambda)
                 size = (avg_rate * td) / 8 #unit MB
             src = np.random.choice(self.nodes)
@@ -47,21 +47,23 @@ class traffic_gen:
         else:
             return requests
 
-sources = ['CL','AMS','CLD','FF']
-C = 10000 #10 Mbps
-epoch = 1
-gen = traffic_gen(sources,C,epoch)
 
-algo = 'ljf' ##sys.argv[3]
-s = scheduler.Scheduler(epoch,algo,debug=False)
+if __name__ == "__main__":
+    sources = ['CL','AMS','CLD','FF']
+    C = 10000 #10 Mbps
+    epoch = 1
+    gen = traffic_gen(sources,C,epoch)
+
+    algo = 'ljf' ##sys.argv[3]
+    s = scheduler.Scheduler(epoch,algo,debug=False)
 
 
-for i in range(0,100):
-    requests = gen.generate_requests()
-    new_flows, rejected_flows, updated_flows = s.sched(requests)
-    print "new flows",new_flows
-    print "rejected flows",rejected_flows
-    print "updated flows",updated_flows
+    for i in range(0,100):
+        requests = gen.generate_requests()
+        new_flows, rejected_flows, updated_flows = s.sched(requests)
+        print "new flows",new_flows
+        print "rejected flows",rejected_flows
+        print "updated flows",updated_flows
 
-print "reject count = ",s.reject_count,"reject rate = ",s.reject_count/(gen.tot_req*1.0)
-print "get accept rate",s.get_reject_rate()
+    print "reject count = ",s.reject_count,"reject rate = ",s.reject_count/(gen.tot_req*1.0)
+    print "get accept rate",s.get_reject_rate()
