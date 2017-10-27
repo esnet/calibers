@@ -67,3 +67,4 @@ if __name__ == "__main__":
 
     print "reject count = ",s.reject_count,"reject rate = ",s.reject_count/(gen.tot_req*1.0)
     print "get accept rate",s.get_reject_rate()
+    print "Number of flows missed deadlines",s.miss_td_count

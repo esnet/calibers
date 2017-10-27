@@ -21,6 +21,7 @@ class Scheduler:
         epoch = float(epochx)
         self.success_count = 0
         self.reject_count = 0
+        self.miss_td_count = 0
         self.no_request = 0
         self.t_now = -1*epoch #initial timeslot (epoch)
         self.flows = dict() #indexed by the flow_id
@@ -64,63 +65,83 @@ class Scheduler:
             temp_sum = temp_sum + (self.flows[f.flow_id].Ralloc - self.flows[f.flow_id].Rmin)
 
             if temp_sum >= new_f.Rmin:
-                self.success_count = self.success_count + 1
                 #this last flow don't take its whole slack, just take enough to reach RMin for new flow
                 self.flows[f.flow_id].set_rate((self.flows[f.flow_id].Rmin + (temp_sum - new_f.Rmin)),self.t_now)
                 for x in involved_flows:
                     self.updated_flows_temp[x.flow_id] = (x.src,x.Ralloc)
-                    #self.updated_flows_temp[x] = (self.flows[x].src,self.flows[x].Ralloc)
 
                 if self.debug == True:
                     print "after pacing: flow",f.flow_id," Ralloc: ",self.flows[f.flow_id].Ralloc," te ",self.flows[f.flow_id].te
-
+                #assign Rmin and te to the new flow
                 new_f.set_rate(new_f.Rmin,self.t_now)
-                self.flows[new_f.flow_id] = new_f
-                if self.debug == True:
-                    print "Success, the flow was assigned rate of ", new_f.Ralloc," Rmin ",new_f.Rmin," te ",new_f.te
-                self.new_flows_temp[new_f.flow_id] = (new_f.src,new_f.Ralloc)
-                #self.new_flows.append((new_f.src,new_f.Ralloc))
-                #xx = 0
-                #for ff in self.flows:
-                #    xx = xx + self.flows[ff].Ralloc
-                #print "after pace: the total bandwidth now",xx
-                return
+                #check because new_f might be just a flow that was expected to finish but it didn't
+                if new_f not in self.flows:
+                    self.success_count = self.success_count + 1
+                    self.flows[new_f.flow_id] = new_f
+                    if self.debug == True:
+                        print "Success, the flow was assigned rate of ", new_f.Ralloc," Rmin ",new_f.Rmin," te ",new_f.te
+                return True
             else:
                 #update flow Ralloc te slack
                 self.flows[f.flow_id].set_rate(self.flows[f.flow_id].Rmin,self.t_now)
                 
         #if we reached here, then we cannot pace flows and get Rmin for the new flow
-        if self.debug == True:
-            print "Reject, no available bandwidth even with pacing"
-        self.reject_count = self.reject_count + 1
-        self.revert_flow_changes(involved_flows)
-        self.rejected_flows.append((new_f.src,new_f.Ralloc))
-
+        if new_f not in self.flows:
+            if self.debug == True:
+                print "Reject, no available bandwidth even with pacing"
+            self.reject_count = self.reject_count + 1
+            self.revert_flow_changes(involved_flows)
+            self.rejected_flows.append((new_f.src,new_f.Ralloc))
+        else:
+            return False
 
     def revert_flow_changes(self,involved_flows):
         for f in involved_flows:
             self.flows[f.flow_id] = f
 
-#    def copy_flow_object(self,flow_orig):
-#        flow(self.no_request,req.size,req.td,req.src,req.dst,self.t_now) 
-#        flow_copy = flow(flow_orig.flow_id,flow_orig.size,flow_orig.td,flow_orig.src,flow_orig.dst,self.t_now)
-#        flow_copy
-
-    #coordinator can give this information
+    #coordinator should give this information
     def check_flow_completed(self,f):
+        return False
         if self.flows[f].te <= int(self.t_now):
             return True
         else:
             return False
+    #coordinator should give this information
+    def get_flow_info(self,f):
+        new_td = self.flows[f].td + 2*60 #here I'm assuming the coordinater decreased td by 2 min
+        new_remain_data = 1000000 #assuming 100MB
+        return new_td, new_remain_data
 
     def delete_completed_flows(self):
         global epoch
         current_flows = dict() #need to make a copy to delete
         for f in self.flows:
-            if self.check_flow_completed(f) == True:
-                if self.debug == True:
-                    print "flow",f, " finished"
-                #delete the flow id from the links involved
+            if self.flows[f].te <= int(self.t_now): 
+                #the flow should have finished, check with the coordinator
+                if self.check_flow_completed(f) == True:
+                    if self.debug == True:
+                        print "flow",f, " finished"
+                else:
+                    current_flows[f] = self.flows[f]
+                    new_td, new_remain_size = self.get_flow_info(f)
+                    self.flows[f].td = new_td
+                    self.flows[f].remain_data = new_remain_size
+                    self.flows[f].size = self.flows[f].size + new_remain_size 
+                    new_Rmin = self.flows[f].compute_new_Rmin(self.t_now)
+                    if new_Rmin <= self.flows[f].Ralloc:
+                        self.flows[f].Rmin = self.flows[f].Ralloc
+                    else:
+                        #need to pace because the new Rmin is higher than what the flow was assigned
+                        if self.pace(f) == False:
+                            self.miss_td_count = self.miss_td_count + 1
+                            #the flow will misses its deadline just give it what was assigned previously
+                            #assign its Rmin to previous Ralloc
+                            #but Rmin will be updated by update function and will be higher than Ralloc
+                            #best way is to set its td in a way that ensures Rmin will not change
+                            #but this flow might get more bandwidth in reshape if we don't want this we should set a flag for flows that expected to miss their deadline and ignore them in reshape 
+                            #TODO: change td maybe
+                            self.flows[f].Rmin = self.flows[f].Ralloc
+                            
             else:
                 current_flows[f] = self.flows[f]
                 current_flows[f].update(self.t_now)
@@ -270,6 +291,10 @@ class flow:
         self.Ralloc = rate
         self.te = int(t_now + (self.remain_data/(self.Ralloc*1.0)))
         self.slack = self.Ralloc - self.Rmin
+
+    #recopute Rmin when a flow that was supposed to finish 
+    def compute_new_Rmin(self,t_now):
+        return int(self.remain_data*1.0 / ((self.td - t_now)))
 
 class Request:
     def __init__(self,src,dst,size,ts,td):
