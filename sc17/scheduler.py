@@ -231,17 +231,17 @@ class Scheduler:
 
         for f in self.updated_flows_temp:
             if f in self.new_flows_temp:
-                self.new_flows_temp[f] = (self.updated_flows_temp[f][0],ceil(self.updated_flows_temp[f][1]/1000000.0)) 
+                self.new_flows_temp[f] = self.updated_flows_temp[f] 
             else:
                 prev_Ralloc = self.original_flows_info[f].Ralloc
                 src,new_Ralloc = self.updated_flows_temp[f]
                 if int(prev_Ralloc) == int(new_Ralloc): #only if Ralloc changed add it to updated_flows
                     continue
                 else:
-                    self.updated_flows.append((self.updated_flows_temp[f][0],ceil(self.updated_flows_temp[f][1]/1000000.0)))
+                    self.updated_flows.append(self.updated_flows_temp[f])
 
         for f in self.new_flows_temp:
-                self.new_flows.append((self.new_flows_temp[f][0],ceil(self.new_flows_temp[f][1]/1000000.0)))
+                self.new_flows.append(self.new_flows_temp[f])
 
         return self.new_flows, self.rejected_flows, self.updated_flows
 
