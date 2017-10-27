@@ -5,6 +5,7 @@ import time
 import random
 from math import *
 import numpy as np
+import copy
 
 epoch = 100.0 #300.0 #1 #timeslot, periodic sceduling, unit seconds
 C = int(10000 * 1e6) #link capaacity in bps
@@ -31,7 +32,7 @@ class Scheduler:
 
         self.updated_flows_temp = dict() #because we might update a flow and then updated it again, so will keep a dictionay
         self.new_flows_temp = dict()
-        self.original_flows_info = dict() 
+        self.original_flows_info = dict()  #after multiple update we might end up with the same previous Ralloc, so we keep track of original Ralloc so that we don't ask the coordinator to update a flow rate, but actually it is the same previous rate
         
 
     def pace(self,new_f):
@@ -56,17 +57,20 @@ class Scheduler:
         #print "before pace: the total bandwidth now",xx
 
         temp_sum = 0 
-        involved_flows = []
+        involved_flows = [] #hold flows original info
         for f in temp_flows: 
-            involved_flows.append(self.flows[f.flow_id]) # keep the flow original info
+            z = copy.copy(f) #if we don't make a copy of the object, then later on changes to self.flows will impact involved_flows because python only do binding
+            involved_flows.append(z)
             temp_sum = temp_sum + (self.flows[f.flow_id].Ralloc - self.flows[f.flow_id].Rmin)
 
             if temp_sum >= new_f.Rmin:
-                for x in involved_flows:
-                    self.updated_flows_temp[x.flow_id] = (x.src,x.Ralloc)
                 self.success_count = self.success_count + 1
                 #this last flow don't take its whole slack, just take enough to reach RMin for new flow
                 self.flows[f.flow_id].set_rate((self.flows[f.flow_id].Rmin + (temp_sum - new_f.Rmin)),self.t_now)
+                for x in involved_flows:
+                    self.updated_flows_temp[x.flow_id] = (x.src,x.Ralloc)
+                    #self.updated_flows_temp[x] = (self.flows[x].src,self.flows[x].Ralloc)
+
                 if self.debug == True:
                     print "after pacing: flow",f.flow_id," Ralloc: ",self.flows[f.flow_id].Ralloc," te ",self.flows[f.flow_id].te
 
@@ -92,9 +96,15 @@ class Scheduler:
         self.revert_flow_changes(involved_flows)
         self.rejected_flows.append((new_f.src,new_f.Ralloc))
 
+
     def revert_flow_changes(self,involved_flows):
         for f in involved_flows:
-            self.flows[f.flow_id] = f 
+            self.flows[f.flow_id] = f
+
+#    def copy_flow_object(self,flow_orig):
+#        flow(self.no_request,req.size,req.td,req.src,req.dst,self.t_now) 
+#        flow_copy = flow(flow_orig.flow_id,flow_orig.size,flow_orig.td,flow_orig.src,flow_orig.dst,self.t_now)
+#        flow_copy
 
     #coordinator can give this information
     def check_flow_completed(self,f):
@@ -135,8 +145,8 @@ class Scheduler:
 
         Rresid = C - temp_sum
         if Rresid > 0:
-            reshaped_flow = involved_flows[0].flow_id # will take the first flow in the list 
-            self.flows[reshaped_flow].set_rate(self.flows[reshaped_flow].Ralloc + Rresid,self.t_now)
+            reshaped_flow = involved_flows[0].flow_id #will take the first flow in the list 
+            self.flows[reshaped_flow].set_rate((self.original_flows_info[reshaped_flow].Ralloc + Rresid),self.t_now)
             if self.debug == True:
                 print "flow",reshaped_flow ,"reshaped. Ralloc = ",self.flows[reshaped_flow].Ralloc," te = ",self.flows[reshaped_flow].te
             self.updated_flows_temp[reshaped_flow] = (self.flows[reshaped_flow].src,self.flows[reshaped_flow].Ralloc)
@@ -146,7 +156,6 @@ class Scheduler:
         #    xx =xx + self.flows[ff].Ralloc
         #print "reshape: the total bandwidth now",xx
 
-        
     def sched(self,requests):
         global epoch
         global C
@@ -160,16 +169,16 @@ class Scheduler:
         self.rejected_flows = []
         self.updated_flows_temp = dict()
         self.new_flows_temp = dict()
+        self.original_flows_info = dict()
 
         # check if flow finishes or not
         self.delete_completed_flows() 
     
         #keep original flows info before reshaping/pacing
         self.original_flows_info = self.flows
-
+        
         if len(self.flows) != 0:
             self.reshape() 
-
 
         if len(requests) == 0:
             #no new reuest, return empty lists
@@ -205,7 +214,7 @@ class Scheduler:
             else:
                 prev_Ralloc = self.original_flows_info[f].Ralloc
                 src,new_Ralloc = self.updated_flows_temp[f]
-                if prev_Ralloc == new_Ralloc: #only if Ralloc changed add it to updated_flows
+                if int(prev_Ralloc) == int(new_Ralloc): #only if Ralloc changed add it to updated_flows
                     continue
                 else:
                     self.updated_flows.append(self.updated_flows_temp[f])
@@ -229,6 +238,8 @@ class Scheduler:
 class flow:
     def __init__(self,flow_id,size,td,src,dst,t_now):
         global epoch
+        self.min_shape_rate = 1000000 #the min rate the hosts are capable of shaping at (unit bps)
+        
         self.flow_id = flow_id
         self.src = src
         self.dst =dst
@@ -237,6 +248,8 @@ class flow:
         self.te = self.td #unit in sec
         self.Rmax = int(10000*1e6) # unit bps, max rate the end points and the bottleneck link in the path can achieve
         self.Rmin = int((self.size*1.0) / (self.td - t_now)) #unit bps 
+        if self.Rmin < self.min_shape_rate:
+            self.Rmin = self.min_shape_rate
         self.Ralloc = 0
         self.slack = 0
         self.sent_data = 0 #unit bytes, data sent so far
