@@ -119,7 +119,7 @@ class CoordRequest(scheduler.Request):
 
 
 class Coordinator(threading.Thread):
-	def __init__ (self, name, config_file, epoch_time, scenario_file=None, algo='ljf' ):
+	def __init__ (self, name, config_file, epoch_time, max_rate_mbps=500, scenario_file=None, algo='ljf' ):
 		threading.Thread.__init__(self)
 		self.config_file = config_file
 		self.scenario_file = scenario_file
@@ -133,7 +133,9 @@ class Coordinator(threading.Thread):
 		self.lock = threading.Lock()
 		self.isRunning = False
 		self.algo = algo
-		self.scheduler = scheduler.Scheduler(self.epoch_time,self.algo,debug=False)
+		self.max_rate = max_rate_mbps * 1000 * 1000
+		print 1111, self.max_rate
+		self.scheduler = scheduler.Scheduler(epoch=self.epoch_time,algo=self.algo,max_rate=self.max_rate,debug=False)
 
 	def request_transfer (self, request):
 		request.coordinator = self
@@ -154,19 +156,28 @@ class Coordinator(threading.Thread):
 		return new_requests
 
 
-	def terminates(self):
+	def stop(self):
 		self.isRunning = False
 
 	def run(self):
 		self.isRunning = True
 		while (self.isRunning):
 			start_time = time.time()
-			print "call scheduler",time.ctime()
 			new_requests = self.get_next_requests()
-			print new_requests
-			self.scheduler.sched(new_requests)
+			if len(new_requests) > 0:
+				print new_requests
+				new_flows, rejected_flows, updated_flows = self.scheduler.sched(new_requests)
+				print new_flows, rejected_flows, updated_flows
+				tr = 0
+				for f in new_flows:
+					tr += f[1]
+				print "total", tr/1000/1000
 			end_time = time.time()
-			time.sleep (1.0 - (end_time - start_time))
+			time_to_sleep = 1.0 - (end_time - start_time)
+			if (time_to_sleep < 0):
+				print "Cannot keep up with processing an epoch"
+			else:
+				time.sleep (time_to_sleep)
 		print "Request simulation is stopped."
 
 
@@ -179,14 +190,14 @@ class SingleFileGen:
 		self.padding = padding
 		np.random.seed(3)
 
-	def generate_requests(self,dst_dtn, iterations=1,scale = 0.1):
+	def generate_requests(self,dst_dtn, iterations=1,scale = 0.1,min_bias=0.1):
 		all_requests = []
 		for iter in range(iterations):
 			requests = []
 			for dtn in self.sources:
 				size = np.random.choice(self.buckets)
 				min_duration = (size * 8 * 1000 * self.padding) / self.capacity 
-				duration = min_duration * (np.random.exponential(scale=scale)) + min_duration
+				duration = min_duration * (np.random.exponential(scale=scale) + min_bias) + min_duration
 				dst = 0
 				req = CoordRequest(src_dtn=dtn,dst_dtn=dst_dtn,data_size=size,deadline=duration)
 				req.min_duration = min_duration
