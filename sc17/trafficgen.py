@@ -2,6 +2,7 @@ import sys
 import numpy as np
 import scheduler
 
+
 class traffic_gen:
     nodes = []
     C = 10000
