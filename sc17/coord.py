@@ -36,6 +36,13 @@ class DTN:
         self.bias_fun = bias_fun
         self.bias_args = bias_args
         self.requests = []
+        self.current_request_index = -1
+        self.current_request = None
+
+    def get_next_request(self):
+		self.current_request_index += 1
+		self.current_request = self.requests[self.current_request_index]
+		return self.current_request
 
     def __str__(self):
     	return self.name
@@ -125,7 +132,7 @@ class Coordinator(threading.Thread):
 		self.pending_requests = []
 		self.lock = threading.Lock()
 		self.isRunning = False
-		self.algo = 'ljf' ##sys.argv[3]
+		self.algo = algo
 		self.scheduler = scheduler.Scheduler(self.epoch_time,self.algo,debug=False)
 
 	def request_transfer (self, request):
@@ -136,6 +143,17 @@ class Coordinator(threading.Thread):
 	def request_completed (self, request):
 		pass
 
+	def get_next_requests(self):
+		new_requests = []
+		for dtn in self.config.dtns:
+			if dtn.current_request != None and not dtn.current_request.completed:
+				continue
+			req = dtn.get_next_request()
+			if req != None:
+				new_requests.append(req)
+		return new_requests
+
+
 	def terminates(self):
 		self.isRunning = False
 
@@ -144,7 +162,9 @@ class Coordinator(threading.Thread):
 		while (self.isRunning):
 			start_time = time.time()
 			print "call scheduler",time.ctime()
-			self.scheduler.sched(requests)
+			new_requests = self.get_next_requests()
+			print new_requests
+			self.scheduler.sched(new_requests)
 			end_time = time.time()
 			time.sleep (1.0 - (end_time - start_time))
 		print "Request simulation is stopped."
