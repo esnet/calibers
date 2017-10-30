@@ -3,6 +3,7 @@ import threading
 import time
 import datetime
 import numpy as np
+from flask import Flask, request
 
 import scheduler
 
@@ -119,7 +120,7 @@ class CoordRequest(scheduler.Request):
 
 
 class Coordinator(threading.Thread):
-	def __init__ (self, name, config_file, epoch_time, max_rate_mbps=500, scenario_file=None, algo='ljf' ):
+	def __init__ (self, name, config_file, epoch_time, max_rate_mbps=500, scenario_file=None, algo='ljf',app_ip="localhost" ):
 		threading.Thread.__init__(self)
 		self.config_file = config_file
 		self.scenario_file = scenario_file
@@ -134,8 +135,9 @@ class Coordinator(threading.Thread):
 		self.isRunning = False
 		self.algo = algo
 		self.max_rate = max_rate_mbps * 1000 * 1000
-		print 1111, self.max_rate
+		self.app_ip = app_ip
 		self.scheduler = scheduler.Scheduler(epoch=self.epoch_time,algo=self.algo,max_rate=self.max_rate,debug=False)
+		self.app = App(name="name", ip=self.app_ip, coord=self)
 
 	def request_transfer (self, request):
 		request.coordinator = self
@@ -226,6 +228,23 @@ class SingleFileGen:
 			dtn.requests = list(reqs_per_dtn[dtn_index])
 			dtn_index += 1
 		return reqs
+
+
+class App:
+	def __init__(self, name,coord,ip='0.0.0.0'):
+		self.ip = ip
+		self.coord = coord
+		self.app = Flask("__name__")
+		self.app.add_url_rule('/','current',self.current)
+		self.flaskRunThread = threading.Thread(target=self.run)
+		self.flaskRunThread.start()
+
+	def run(self):
+		self.app.run(host=self.ip, threaded=True)
+
+	def current(self):
+		return "current requests"
+
 
 
 
