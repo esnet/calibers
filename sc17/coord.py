@@ -3,7 +3,10 @@ import threading
 import time
 import datetime
 import numpy as np
-from flask import Flask, request
+from flask import Flask
+from flask_restful import Resource, Api
+from flask_restful import reqparse
+
 
 import scheduler
 
@@ -137,7 +140,7 @@ class Coordinator(threading.Thread):
 		self.max_rate = max_rate_mbps * 1000 * 1000
 		self.app_ip = app_ip
 		self.scheduler = scheduler.Scheduler(epoch=self.epoch_time,algo=self.algo,max_rate=self.max_rate,debug=False)
-		self.app = App(name="name", ip=self.app_ip, coord=self)
+		self.app = CoordApp(name="calibers-api", ip=self.app_ip, coord=self)
 
 	def request_transfer (self, request):
 		request.coordinator = self
@@ -229,21 +232,66 @@ class SingleFileGen:
 			dtn_index += 1
 		return reqs
 
+class ReceivedFile:
+	def __init__ (self,name,size,src_dtn):
+		self.name = name
+		self.size = size
+		self.src_dtn = src_dtn
+		self.received = 0
+		self.completion = 0.0
+		self.last_received = 0.0
+		self.last_timestamp = 0.0
 
-class App:
-	def __init__(self, name,coord,ip='0.0.0.0'):
+
+class FlowUpdate(Resource):
+	__name__ = "FlowUpdate"
+	app = None
+	parser = None
+
+	def __init__(self, app=None):
+		if app != None:
+			FlowUpdate.app = app
+			FlowUpdate.parser = reqparse.RequestParser()
+			FlowUpdate.parser.add_argument('timestamp', type=float, help='Timestamp seconds since epoch.')
+			FlowUpdate.parser.add_argument('received', type=int, help='Received bytes.')
+			FlowUpdate.parser.add_argument('completion', type=float, help='Receiving rate of the file.')
+			FlowUpdate.parser.add_argument('rate', type=float, help='Receiving rate of the file.')
+
+	def put(self, filename):
+		args = FlowUpdate.parser.parse_args()
+		print "TEST", args == None
+		print "ARGS", args
+		return {'result': filename}
+
+class CoordApp:
+	def __init__(self, name,coord,ip='127.0.0.1'):
 		self.ip = ip
 		self.coord = coord
-		self.app = Flask("__name__")
+		self.app = Flask("__nae__")
+		self.api = Api(self.app)
+		self.set_endpoints()
+		self.set_api()
+		#self.flaskRunThread = threading.Thread(target=self.run)
+		#self.flaskRunThread.start()
+		self.run()
+		self.files = {}
+
+	def set_endpoints(self):
 		self.app.add_url_rule('/','current',self.current)
-		self.flaskRunThread = threading.Thread(target=self.run)
-		self.flaskRunThread.start()
+
+	def set_api(self):
+		self.api.add_resource(FlowUpdate(app=self), '/api/files/<filename>')
+
+
 
 	def run(self):
 		self.app.run(host=self.ip, threaded=True)
 
 	def current(self):
 		return "current requests"
+
+	def update_flow (self, src, completion, rate):
+		print "Update from",src,"completion",completion,"rate",rate
 
 
 
