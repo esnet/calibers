@@ -102,20 +102,6 @@ class CoordRequest(scheduler.Request):
 		self.description = description
 		self.coordinator = None
 
-		def accepted(self):
-			pass
-
-		def rejected(self):
-			pass
-
-		def completed(self):
-			pass
-
-		def started(self):
-			pass
-		def updated(self):
-			pass
-
 	def __str__(self):
 		return  self.src_dtn.name + " -> " + self.dst_dtn.name + " completion: " + str(self.percent_completion)
 	def __repr__(self):
@@ -123,6 +109,7 @@ class CoordRequest(scheduler.Request):
 
 
 class Coordinator(threading.Thread):
+	debug = False
 	def __init__ (self, name, config_file, epoch_time, max_rate_mbps=500, scenario_file=None, algo='ljf',app_ip="localhost" ):
 		threading.Thread.__init__(self)
 		self.config_file = config_file
@@ -133,7 +120,7 @@ class Coordinator(threading.Thread):
 		self.accepted_requests = []
 		self.rejected_request = []
 		self.completed_requests = []
-		self.pending_requests = []
+		self.current_requests = []
 		self.lock = threading.Lock()
 		self.isRunning = False
 		self.algo = algo
@@ -141,14 +128,6 @@ class Coordinator(threading.Thread):
 		self.app_ip = app_ip
 		self.scheduler = scheduler.Scheduler(epoch=self.epoch_time,algo=self.algo,max_rate=self.max_rate,debug=False)
 		self.app = CoordApp(name="calibers-api", ip=self.app_ip, coord=self)
-
-	def request_transfer (self, request):
-		request.coordinator = self
-		with self.lock:
-			self.pending_requests.append(request)
-
-	def request_completed (self, request):
-		pass
 
 	def get_next_requests(self):
 		new_requests = []
@@ -160,7 +139,6 @@ class Coordinator(threading.Thread):
 				new_requests.append(req)
 		return new_requests
 
-
 	def stop(self):
 		self.isRunning = False
 
@@ -170,13 +148,13 @@ class Coordinator(threading.Thread):
 			start_time = time.time()
 			new_requests = self.get_next_requests()
 			if len(new_requests) > 0:
-				print new_requests
 				new_flows, rejected_flows, updated_flows = self.scheduler.sched(new_requests)
-				print new_flows, rejected_flows, updated_flows
-				tr = 0
-				for f in new_flows:
-					tr += f[1]
-				print "total", tr/1000/1000
+				if Coordinator.debug:
+					print new_flows, rejected_flows, updated_flows
+					tr = 0
+					for f in new_flows:
+						tr += f[1]
+						print "total", tr/1000/1000
 			end_time = time.time()
 			time_to_sleep = 1.0 - (end_time - start_time)
 			if (time_to_sleep < 0):
@@ -184,6 +162,24 @@ class Coordinator(threading.Thread):
 			else:
 				time.sleep (time_to_sleep)
 		print "Request simulation is stopped."
+
+	def process_flows (self, new_flows, updated_flows, rejected_flows):
+
+		for flow in new_flows:
+			self.start_flow(flow)
+		for flow in updated_flows:
+			self.update_flow(flow)
+		for flow in rejected_flows:
+			self.reject_flow(flow)
+
+	def start_flow(self, flow):
+		self.current_requests.append(flow)
+
+	def update_flow(self, flow):
+		pass
+
+	def reject_flow(self, flow):
+		pass
 
 
 class SingleFileGen:
@@ -233,6 +229,10 @@ class SingleFileGen:
 		return reqs
 
 class ReceivedFile:
+
+	src_root_path = "/storage"
+	dst_root_path = "/storage"
+
 	def __init__ (self,name,size,src_dtn):
 		self.name = name
 		self.size = size
@@ -241,6 +241,25 @@ class ReceivedFile:
 		self.completion = 0.0
 		self.last_received = 0.0
 		self.last_timestamp = 0.0
+		self.id = self.dtn.name + name + "-" + str(self.size)
+		self.comment = self.id
+
+
+class NewTransfers(Resource):
+	__name__ = "NewTransfers"
+	last_polled = []
+	app = None
+
+	def __init__(self, app=None):
+		if app != None:
+			FlowUpdate.app = app
+
+	def get(self):
+		new_requests = []
+		if NewTransfers.app == None:
+			return []
+		for req in  NewTransfers.app.coord.current_requests:
+			pass
 
 
 class FlowUpdate(Resource):
@@ -271,10 +290,8 @@ class CoordApp:
 		self.api = Api(self.app)
 		self.set_endpoints()
 		self.set_api()
-		#self.flaskRunThread = threading.Thread(target=self.run)
-		#self.flaskRunThread.start()
-		self.run()
-		self.files = {}
+		self.flaskRunThread = threading.Thread(target=self.run)
+		self.flaskRunThread.start()
 
 	def set_endpoints(self):
 		self.app.add_url_rule('/','current',self.current)
