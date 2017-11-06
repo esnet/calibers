@@ -5,6 +5,9 @@
 # From the jupyter notebook declaring file sizes:
 # buckets=[30*1024,15*1024,10*1024,5*1024,1*1024,512,128]
 
+#Set MTU to 9000
+ifconfig eth1 mtu 9000
+
 #Create files
 if [ ! -e "/storage/128.img" ]
 then
