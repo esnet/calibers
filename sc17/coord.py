@@ -298,7 +298,7 @@ class CoordApp:
 		self.flaskRunThread.start()
 
 	def set_endpoints(self):
-		self.app.add_url_rule('/','current',self.current)
+		self.app.add_url_rule('/api/','current',self.current)
 
 	def set_api(self):
 		self.api.add_resource(FlowUpdate(app=self), '/api/files/<filename>')
@@ -310,6 +310,7 @@ class CoordApp:
 		self.app.run(host=self.ip, threaded=True)
 
 	def current(self):
+		print "CURRENT"
 		return "current requests"
 
 	def update_flow (self, src, completion, rate):
