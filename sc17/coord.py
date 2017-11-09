@@ -3,7 +3,7 @@ import threading
 import time
 import datetime
 import numpy as np
-from flask import Flask
+from flask import Flask, request
 from flask_restful import Resource, Api
 from flask_restful import reqparse
 
@@ -120,7 +120,8 @@ class Coordinator(threading.Thread):
 		self.accepted_requests = []
 		self.rejected_request = []
 		self.completed_requests = []
-		self.current_requests = []
+		self.current_requests = {}
+		self.monitor_pending_requests = []
 		self.lock = threading.Lock()
 		self.isRunning = False
 		self.algo = algo
@@ -130,13 +131,13 @@ class Coordinator(threading.Thread):
 		self.app = CoordApp(name="calibers-api", ip=self.app_ip, coord=self)
 
 	def get_next_requests(self):
-		new_requests = []
+		new_requests = {}
 		for dtn in self.config.dtns:
 			if dtn.current_request != None and not dtn.current_request.completed:
 				continue
 			req = dtn.get_next_request()
 			if req != None:
-				new_requests.append(req)
+				new_requests[req.src_dtn.name] = req
 		return new_requests
 
 	def stop(self):
@@ -147,14 +148,15 @@ class Coordinator(threading.Thread):
 		while (self.isRunning):
 			start_time = time.time()
 			new_requests = self.get_next_requests()
-			if len(new_requests) > 0:
-				new_flows, rejected_flows, updated_flows = self.scheduler.sched(new_requests)
-				if Coordinator.debug:
-					print new_flows, rejected_flows, updated_flows
-					tr = 0
-					for f in new_flows:
-						tr += f[1]
-						print "total", tr/1000/1000
+			reqs = new_requests.values()
+			if len(reqs) > 0:
+				new_flows, rejected_flows, updated_flows = self.scheduler.sched(reqs)
+				for flow in new_flows:
+					self.start_flow(flow,new_requests)
+				for flow in updated_flows:
+					self.update_flow(flow, new_requests)
+				for flow in rejected_flows:
+					self.reject_flow(flow, new_requests)
 			end_time = time.time()
 			time_to_sleep = 1.0 - (end_time - start_time)
 			if (time_to_sleep < 0):
@@ -163,22 +165,18 @@ class Coordinator(threading.Thread):
 				time.sleep (time_to_sleep)
 		print "Request simulation is stopped."
 
-	def process_flows (self, new_flows, updated_flows, rejected_flows):
+	def start_flow(self, flow, requests):
+		if Coordinator.debug:
+			print "Start flow from",flow
+		with self.lock:
+			req = requests[flow[0]]
+			self.current_requests[flow[0]] = req
+			self.monitor_pending_requests.append(req)
 
-		for flow in new_flows:
-			self.start_flow(flow)
-		for flow in updated_flows:
-			self.update_flow(flow)
-		for flow in rejected_flows:
-			self.reject_flow(flow)
-
-	def start_flow(self, flow):
-		self.current_requests.append(flow)
-
-	def update_flow(self, flow):
+	def update_flow(self, flow, requests):
 		pass
 
-	def reject_flow(self, flow):
+	def reject_flow(self, flow, requests):
 		pass
 
 
@@ -228,21 +226,6 @@ class SingleFileGen:
 			dtn_index += 1
 		return reqs
 
-class ReceivedFile:
-
-	src_root_path = "/storage"
-	dst_root_path = "/storage"
-
-	def __init__ (self,name,size,src_dtn):
-		self.name = name
-		self.size = size
-		self.src_dtn = src_dtn
-		self.received = 0
-		self.completion = 0.0
-		self.last_received = 0.0
-		self.last_timestamp = 0.0
-		self.id = self.dtn.name + name + "-" + str(self.size)
-		self.comment = self.id
 
 
 class NewTransfers(Resource):
@@ -252,14 +235,37 @@ class NewTransfers(Resource):
 
 	def __init__(self, app=None):
 		if app != None:
-			FlowUpdate.app = app
+			NewTransfers.app = app
 
 	def get(self):
-		new_requests = []
+		result = {}
+		print "New Transfers"
 		if NewTransfers.app == None:
 			return []
-		for req in  NewTransfers.app.coord.current_requests:
-			pass
+		with self.app.coord.lock:
+			for req in  NewTransfers.app.coord.monitor_pending_requests:
+				entry = {}
+				entry["file_route"] = "/tmp/files_storage/" + req.src_dtn.name
+				entry["expected_size"] = req.size
+				entry["deadline"] = time.time() + req.td
+				result[req.src_dtn.name] = entry
+			NewTransfers.app.coord.monitor_pending_requests = []	
+		return result
+
+class Shutdown(Resource):
+	__name__ = "Shutdown"
+	app = None
+
+	def __init__(self, app=None):
+		if app != None:
+			Shutdown.app = app
+
+	def post(self):
+		func = request.environ.get('werkzeug.server.shutdown')
+		if func is None:
+			return 'Not running with the Werkzeug Server'
+		func()
+		return "Shutdown in progress..."
 
 
 class FlowUpdate(Resource):
@@ -278,8 +284,6 @@ class FlowUpdate(Resource):
 
 	def put(self, filename):
 		args = FlowUpdate.parser.parse_args()
-		print "TEST", args == None
-		print "ARGS", args
 		return {'result': filename}
 
 class CoordApp:
@@ -298,7 +302,8 @@ class CoordApp:
 
 	def set_api(self):
 		self.api.add_resource(FlowUpdate(app=self), '/api/files/<filename>')
-
+		self.api.add_resource(Shutdown(app=self), '/api/stop')
+		self.api.add_resource(NewTransfers(app=self), '/api/configs/')
 
 
 	def run(self):
