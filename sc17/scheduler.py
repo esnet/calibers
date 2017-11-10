@@ -5,18 +5,20 @@ import time
 import random
 from math import *
 import numpy as np
+import copy
 
-
+epoch = 1.0
 class Scheduler:
-    def __init__ (self,epoch,max_rate,algo,debug = False):
+    def __init__ (self,epochx,max_rate,algo,debug = False):
+        global epoch
         self.debug = debug
         self.algo = algo
-        self.epoch = float(epoch)
+        epoch = epochx
         self.success_count = 0
         self.reject_count = 0
         self.no_request = 0
         self.max_rate = max_rate
-        self.t_now = -1*self.epoch #initial timeslot (epoch)
+        self.t_now = -1*epoch #initial timeslot (epoch)
         self.flows = dict() #indexed by the flow_id
 
         #those three lists are returned to the coordinator
@@ -43,15 +45,17 @@ class Scheduler:
         else:
             print "invalid algo"
 
-        #xx = 0
-        #for ff in self.flows:
-        #    xx = xx + self.flows[ff].Ralloc
-        #print "before pace: the total bandwidth now",xx
+        xx = 0
+        for ff in self.flows:
+            xx = xx + self.flows[ff].Ralloc
+        print "before pace: the total bandwidth now",xx
 
         temp_sum = 0 
         involved_flows = []
         for f in temp_flows: 
-            involved_flows.append(self.flows[f.flow_id]) # keep the flow original info
+            z = copy.copy(f) #if we don't make a copy of the object, then later on changes to self.flows will impact involved_flows because python only do binding
+            involved_flows.append(z)
+            #involved_flows.append(self.flows[f.flow_id]) # keep the flow original info
             temp_sum = temp_sum + (self.flows[f.flow_id].Ralloc - self.flows[f.flow_id].Rmin)
 
             if temp_sum >= new_f.Rmin:
@@ -69,10 +73,10 @@ class Scheduler:
                     print "Success, the flow was assigned rate of ", new_f.Ralloc," Rmin ",new_f.Rmin," te ",new_f.te
                 self.new_flows_temp[new_f.flow_id] = (new_f.src,new_f.Ralloc)
                 #self.new_flows.append((new_f.src,new_f.Ralloc))
-                #xx = 0
-                #for ff in self.flows:
-                #    xx = xx + self.flows[ff].Ralloc
-                #print "after pace: the total bandwidth now",xx
+                xx = 0
+                for ff in self.flows:
+                    xx = xx + self.flows[ff].Ralloc
+                print "after pace: the total bandwidth now",xx
                 return
             else:
                 #update flow Ralloc te slack
@@ -84,6 +88,10 @@ class Scheduler:
         self.reject_count = self.reject_count + 1
         self.revert_flow_changes(involved_flows)
         self.rejected_flows.append((new_f.src,new_f.Ralloc))
+        xx = 0
+        for ff in self.flows:
+            xx = xx + self.flows[ff].Ralloc
+        print "after pace: the total bandwidth now",xx
 
     def revert_flow_changes(self,involved_flows):
         for f in involved_flows:
@@ -126,6 +134,7 @@ class Scheduler:
             temp_sum = temp_sum + self.flows[f].Ralloc
 
         Rresid = self.max_rate - temp_sum
+        print "In reshape Rresid:",Rresid
         if Rresid > 0:
             reshaped_flow = involved_flows[0].flow_id # will take the first flow in the list 
             self.flows[reshaped_flow].set_rate(self.flows[reshaped_flow].Ralloc + Rresid,self.t_now)
@@ -133,14 +142,14 @@ class Scheduler:
                 print "flow",reshaped_flow ,"reshaped. Ralloc = ",self.flows[reshaped_flow].Ralloc," te = ",self.flows[reshaped_flow].te
             self.updated_flows_temp[reshaped_flow] = (self.flows[reshaped_flow].src,self.flows[reshaped_flow].Ralloc)
 
-        #xx = 0
-        #for ff in self.flows:
-        #    xx =xx + self.flows[ff].Ralloc
-        #print "reshape: the total bandwidth now",xx
+        xx = 0
+        for ff in self.flows:
+            xx =xx + self.flows[ff].Ralloc
+        print "reshape: the total bandwidth now",xx
 
         
     def sched(self,requests):
-        self.t_now = self.t_now + self.epoch
+        self.t_now = self.t_now + epoch
         if self.debug == True:
             print "\nt_now = ", self.t_now
         
@@ -203,6 +212,11 @@ class Scheduler:
         for f in self.new_flows_temp:
             self.new_flows.append(self.new_flows_temp[f])
 
+        xx = 0
+        for ff in self.flows:
+            xx =xx + self.flows[ff].Ralloc
+        print "End of scheduler: the total bandwidth now",xx
+
         return self.new_flows, self.rejected_flows, self.updated_flows
 
     def get_total_no_requests(self):
@@ -218,6 +232,7 @@ class Scheduler:
 
 class flow:
     def __init__(self,flow_id,size,td,src,dst,t_now):
+        global epoch
         self.flow_id = flow_id
         self.src = src
         self.dst =dst
@@ -232,7 +247,7 @@ class flow:
         self.remain_data = int(self.size - self.sent_data)
 
     def update(self,t_now):
-        self.sent_data = int(self.sent_data + (self.Ralloc*self.epoch)) #in bits  
+        self.sent_data = int(self.sent_data + (self.Ralloc*epoch)) #in bits  
         self.remain_data = int(((self.size - self.sent_data)))
         self.Rmin = int(self.remain_data*1.0 / ((self.td - t_now)))
         self.te = int(t_now + (self.remain_data / (self.Ralloc*1.0)))
