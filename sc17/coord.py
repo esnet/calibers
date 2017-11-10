@@ -2,6 +2,7 @@ import pickle
 import threading
 import time
 import datetime
+import requests
 import numpy as np
 from flask import Flask, request
 from flask_restful import Resource, Api
@@ -103,7 +104,7 @@ class CoordRequest(scheduler.Request):
 		self.coordinator = None
 
 	def __str__(self):
-		return  self.src_dtn.name + " -> " + self.dst_dtn.name + " completion: " + str(self.percent_completion)
+		return  self.src_dtn.name + " -> " + self.dst_dtn.name + " completion: " + str(self.percent_completion) + " deadline: " + str(self.td)
 	def __repr__(self):
 		return self.__str__()
 
@@ -144,6 +145,7 @@ class Coordinator(threading.Thread):
 		self.isRunning = False
 
 	def run(self):
+		print "Coordinator is starting."
 		self.isRunning = True
 		while (self.isRunning):
 			start_time = time.time()
@@ -152,11 +154,14 @@ class Coordinator(threading.Thread):
 			if len(reqs) > 0:
 				new_flows, rejected_flows, updated_flows = self.scheduler.sched(reqs)
 				for flow in new_flows:
-					self.start_flow(flow,new_requests)
+					req = new_requests[flow[0]]
+					self.start_flow(req)
 				for flow in updated_flows:
-					self.update_flow(flow, new_requests)
+					req = new_rrequests[flow[0]]
+					self.update_flow(req)
 				for flow in rejected_flows:
-					self.reject_flow(flow, new_requests)
+					req = new_rrequests[flow[0]]
+					self.reject_flow(req)
 			end_time = time.time()
 			time_to_sleep = 1.0 - (end_time - start_time)
 			if (time_to_sleep < 0):
@@ -165,19 +170,30 @@ class Coordinator(threading.Thread):
 				time.sleep (time_to_sleep)
 		print "Request simulation is stopped."
 
-	def start_flow(self, flow, requests):
+	def start_flow(self, req):
 		if Coordinator.debug:
-			print "Start flow from",flow
+			print "Start flow from",req
 		with self.lock:
-			req = requests[flow[0]]
-			self.current_requests[flow[0]] = req
+			self.current_requests[req.src_dtn.name] = req
 			self.monitor_pending_requests.append(req)
+		self.start_flow_dtn (req)
 
-	def update_flow(self, flow, requests):
+	def update_flow(self, req):
 		pass
 
-	def reject_flow(self, flow, requests):
+	def reject_flow(self, req):
 		pass
+
+	def start_flow_dtn(self, req):
+		url = "http://" + req.src_dtn.ip + ":5000/" + str(req.size)
+		try:
+			results = requests.get(url, params={'dest':'/data/' + req.src_dtn.name})
+		except requests.exceptions.RequestException:
+			return None
+		if results.status_code==200:
+			return results.text
+		else: 
+			return None
 
 
 class SingleFileGen:
@@ -192,20 +208,20 @@ class SingleFileGen:
 	def generate_requests(self,dst_dtn, iterations=1,scale = 0.1,min_bias=0.1):
 		all_requests = []
 		for iter in range(iterations):
-			requests = []
+			reqs = []
 			for dtn in self.sources:
 				size = np.random.choice(self.buckets)
-				min_duration = (size * 8 * 1000 * self.padding) / self.capacity 
+				min_duration = (size * 8.0 * self.padding) / self.capacity 
 				duration = min_duration * (np.random.exponential(scale=scale) + min_bias) + min_duration
 				dst = 0
 				req = CoordRequest(src_dtn=dtn,dst_dtn=dst_dtn,data_size=size,deadline=duration)
 				req.min_duration = min_duration
 				req.delay_ratio = ((req.td - req.min_duration) / req.min_duration) * 100
-				requests.append(req)
+				reqs.append(req)
 				dtn.requests.append(req)
-			all_requests.append(requests)
+			all_requests.append(reqs)
 			if iterations == 1:
-				return requests
+				return reqs
 		return all_requests
 
 	@staticmethod
@@ -226,11 +242,28 @@ class SingleFileGen:
 			dtn_index += 1
 		return reqs
 
+class GetConfig(Resource):
+	__name__ = "GetConfig"
+	app = None
+
+	def __init__(self, app=None):
+		if app != None:
+			GetConfig.app = app
+
+	def get(self):
+		if GetConfig.app == None:
+			return "error"
+		res = {}
+		sites={}
+		res['sites'] = sites
+		for site in GetConfig.app.coord.config.sites:
+			sites[site.name] = {'dtn':site.dtn.name, 'rtt':site.switch.rtt}
+		return res
+
 
 
 class NewTransfers(Resource):
 	__name__ = "NewTransfers"
-	last_polled = []
 	app = None
 
 	def __init__(self, app=None):
@@ -239,7 +272,6 @@ class NewTransfers(Resource):
 
 	def get(self):
 		result = {}
-		print "New Transfers"
 		if NewTransfers.app == None:
 			return []
 		with self.app.coord.lock:
@@ -304,6 +336,7 @@ class CoordApp:
 		self.api.add_resource(FlowUpdate(app=self), '/api/files/<filename>')
 		self.api.add_resource(Shutdown(app=self), '/api/stop')
 		self.api.add_resource(NewTransfers(app=self), '/api/configs/')
+		self.api.add_resource(GetConfig(app=self), '/api/config/')
 
 
 	def run(self):
