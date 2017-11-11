@@ -67,13 +67,14 @@ class Site:
 
 
 class Config:
-    def __init__ (self, switches=None,dtns=None,sites=None):
+    def __init__ (self, switches=None,dtns=None,sites=None, data_subnet=None):
         if switches != None:
             self.switches = switches
         if dtns != None:
             self.dtns = dtns
         if sites != None:
             self.sites= sites
+        self.data_subnet = data_subnet
     def save(self, config_file):
         f = open(config_file,"w")
         pickle.dump(obj=self,file=f)
