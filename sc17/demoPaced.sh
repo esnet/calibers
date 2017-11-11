@@ -1,8 +1,8 @@
 #!/bin/bash
 
 
-# create junk files, start servers
-for i in 190 191 192 194 200 201 118
+# create junk files, refresh servers
+for i in 190 191 192 194 200 201 117
 do
 	echo "*******First contact to $i"
     ssh rootnh@192.168.120.$i << EOF
@@ -94,18 +94,16 @@ time globus-url-copy -cc 6 -p 1 -af calibersAliasFile -f xfer-file
 d=$(date +%F-%H-%M)
 mkdir ~/$d
 
-# move logs, stop servers
-for i in 190 191 192 194 200 201 118
+# move logs
+for i in 190 191 192 194 200 201 117
 do
 	echo "********Third contact to $i"
 	scp rootnh@192.168.120.$i:~/$i.log ~/$d
 	ssh rootnh@192.168.120.$i << EOF
 mkdir ~/$d
 mv *.log ~/$d
-ps aux | grep gridftp
 EOF
 done
-#pkill gridftp
 
 cp results.py ~/$d
 cd ~/$d
