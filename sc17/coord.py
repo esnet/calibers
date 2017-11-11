@@ -31,7 +31,55 @@ class Switch:
     	return self.name
     def __repr__(self):
     	return self.__str__()
-       
+
+    def set_rate(self, rate, burst_factor=1):
+        # Requested rate is in bps, switch needs CIR in kbps
+        # Take ceiling in kbps to ensure we don't meter under rate
+        self.requested_cir = int((rate + 1000)/1000)
+        # Set CBS to bandwidth-delay product (conservative value) kbps x msec = bits / 8000 = kbytes
+        # Multiply by burst_factor to enable reducing CBS, if desired
+        self.cbs = int((self.requested_cir * self.rtt / 8000 )* burst_factor)
+        self.cbs = max(self.cbs, 10) # 10kbytes minimum burst (must be larger than MTU)
+        # Build URL for switch VFC port
+        url="https://" + self.ip + "/api/v1/bridges/" + self.vfc + "/tunnels/" + str(self.ofport)
+        auth = self.token
+        headers={"Authorization":auth,"Content-Type":"application/json"}
+        body = '[{"op":"replace","path":"/meter/cir","value":' + str(self.requested_cir) + '},{"op":"replace","path":"/meter/cbs","value":' + str(self.cbs) + '}]'
+        r = requests.patch(url, headers=headers, data=body, verify=False)
+        if r.status_code != 204:
+            print ("Error: Switch.set_rate() returned ", r.status_code, " for ", self)
+        
+    def get_rate(self):
+        url="https://" + self.ip + "/api/v1/bridges/" + self.vfc + "/tunnels/" + str(self.ofport)
+        auth = self.token
+        headers={"Authorization":auth,"Content-Type":"application/json"}
+        r = requests.get(url, headers=headers, verify=False)
+        if r.status_code == 200:
+            robj = json.loads(r.content)
+            self.actual_cir = robj['meter']['cir']
+            return robj
+        else:
+            print ("Error: Switch.get_rate() returned ", r.status_code," for ", self)
+            return None
+        # if ret = switch.get_rate() && ret != None
+        # CIR is ret['meter']['cir']
+        # CBS is ret['meter']['cbs']
+        
+    def get_stats(self):
+        url="https://" + self.ip + "/api/v1/stats/tunnels?bridge=" + self.vfc + "&ofport=" + str(self.ofport)
+        auth = self.token
+        headers={"Authorization":auth,"Content-Type":"application/json"}
+        r = requests.get(url, headers=headers, verify=False)
+        if r.status_code == 200:
+            return json.loads(r.content)
+        else:
+            print ("Error: Switch.get_stats() returned ", r.status_code," for ", self)
+            return None
+        # if ret = switch.get_stats() && ret != None
+        # RX bytes    is ret['stats'][0]['rx_bytes']
+        # Green bytes is ret['stats'][0]['green_bytes']
+        # Red bytes   is ret['stats'][0]['red_bytes']
+
 
 class DTN:
     def __init__(self, name, ip, port, bias_fun=None, bias_args=None):
@@ -129,7 +177,7 @@ class Coordinator(threading.Thread):
 		self.algo = algo
 		self.max_rate = max_rate_mbps * 1000 * 1000
 		self.app_ip = app_ip
-		self.scheduler = scheduler.Scheduler(epoch=self.epoch_time,algo=self.algo,max_rate=self.max_rate,debug=False)
+		self.scheduler = scheduler.Scheduler(epochx=self.epoch_time,algo=self.algo,max_rate=self.max_rate,debug=False)
 		self.app = CoordApp(name="calibers-api", ip=self.app_ip, coord=self)
 
 	def get_next_requests(self):
@@ -195,6 +243,10 @@ class Coordinator(threading.Thread):
 			return results.text
 		else: 
 			return None
+
+	def meters_port(self, rate):
+		pass
+
 
 
 class SingleFileGen:
