@@ -5,7 +5,7 @@
 for i in 190 191 192 194 200 201 117
 do
 	echo "*******First contact to $i"
-    ssh rootnh@192.168.120.$i << EOF
+    ssh rootnh@192.168.112.$i << EOF
 pkill gridftp
 ps aux | grep gridftp
 globus-gridftp-server -S -p 8$i -data-interface 192.168.112.$i -aa -anonymous-user 'nhanford' -home-dir / -Z ~/$i.log -log-level all
@@ -16,7 +16,7 @@ tc qdisc show dev eth1
 EOF
 done
 # AMST
-ssh rootnh@192.168.120.190 << EOF
+ssh rootnh@192.168.112.190 << EOF
 if [ ! -e "/storage/zero.img" ]
 then
 	dd if=/dev/zero of=/storage/zero.img bs=1M count=2145
@@ -28,7 +28,7 @@ tc qdisc change dev eth1 root fq maxrate 171000002bit
 tc qdisc show
 EOF
 # CERN
-ssh rootnh@192.168.120.194 << EOF
+ssh rootnh@192.168.112.194 << EOF
 if [ ! -e "/storage/zero.img" ]
 then
 	dd if=/dev/zero of=/storage/zero.img bs=1M count=1609
@@ -40,7 +40,7 @@ tc qdisc change dev eth1 root fq maxrate 149955555bit
 tc qdisc show
 EOF
 # AOFA
-ssh rootnh@192.168.120.191 << EOF
+ssh rootnh@192.168.112.191 << EOF
 if [ ! -e "/storage/zero.img" ]
 then
 	dd if=/dev/zero of=/storage/zero.img bs=1M count=429
@@ -52,7 +52,7 @@ tc qdisc change dev eth1 root fq maxrate 99777777bit
 tc qdisc show
 EOF
 # ATLA
-ssh rootnh@192.168.120.200 << EOF
+ssh rootnh@192.168.112.200 << EOF
 if [ ! -e "/storage/zero.img" ]
 then
 	dd if=/dev/zero of=/storage/zero.img bs=1M count=178
@@ -64,7 +64,7 @@ tc qdisc change dev eth1 root fq maxrate 49600000bit
 tc qdisc show
 EOF
 # WASH
-ssh rootnh@192.168.120.192 << EOF
+ssh rootnh@192.168.112.192 << EOF
 if [ ! -e "/storage/zero.img" ]
 then
 	dd if=/dev/zero of=/storage/zero.img bs=1M count=85
@@ -76,7 +76,7 @@ tc qdisc change dev eth1 root fq maxrate 29666666bit
 tc qdisc show
 EOF
 # DENV
-ssh rootnh@192.168.120.201 << EOF
+ssh rootnh@192.168.112.201 << EOF
 if [ ! -e "/storage/zero.img" ]
 then
 	dd if=/dev/zero of=/storage/zero.img bs=1M count=57
@@ -98,8 +98,8 @@ mkdir ~/$d
 for i in 190 191 192 194 200 201 117
 do
 	echo "********Third contact to $i"
-	scp rootnh@192.168.120.$i:~/$i.log ~/$d
-	ssh rootnh@192.168.120.$i << EOF
+	scp rootnh@192.168.112.$i:~/$i.log ~/$d
+	ssh rootnh@192.168.112.$i << EOF
 mkdir ~/$d
 mv *.log ~/$d
 EOF

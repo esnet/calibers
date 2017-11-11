@@ -5,7 +5,7 @@
 for i in 111 112 113 114 115 116
 do
 	echo "*******First contact to $i"
-    ssh rootnh@192.168.120.$i << EOF
+    ssh rootnh@192.168.200.$i << EOF
 pkill gridftp
 ps aux | grep gridftp
 globus-gridftp-server -S -p 8$i -data-interface 192.168.200.$i -aa -anonymous-user 'nhanford' -home-dir / -Z ~/$i.log -log-level all
@@ -16,7 +16,7 @@ tc qdisc show dev eth1
 EOF
 done
 # AMST
-ssh rootnh@192.168.120.111 << EOF
+ssh rootnh@192.168.200.111 << EOF
 if [ ! -e "/storage/zero.img" ]
 then
 	dd if=/dev/zero of=/storage/zero.img bs=1M count=2145
@@ -25,7 +25,7 @@ fi
 ls /storage | grep img
 EOF
 # CERN
-ssh rootnh@192.168.120.112 << EOF
+ssh rootnh@192.168.200.112 << EOF
 if [ ! -e "/storage/zero.img" ]
 then
 	dd if=/dev/zero of=/storage/zero.img bs=1M count=1609
@@ -34,7 +34,7 @@ fi
 ls /storage | grep img
 EOF
 # AOFA
-ssh rootnh@192.168.120.114 << EOF
+ssh rootnh@192.168.200.114 << EOF
 if [ ! -e "/storage/zero.img" ]
 then
 	dd if=/dev/zero of=/storage/zero.img bs=1M count=429
@@ -43,7 +43,7 @@ fi
 ls /storage | grep img
 EOF
 # ATLA
-ssh rootnh@192.168.120.113 << EOF
+ssh rootnh@192.168.200.113 << EOF
 if [ ! -e "/storage/zero.img" ]
 then
 	dd if=/dev/zero of=/storage/zero.img bs=1M count=178
@@ -52,7 +52,7 @@ fi
 ls /storage | grep img
 EOF
 # WASH
-ssh rootnh@192.168.120.115 << EOF
+ssh rootnh@192.168.200.115 << EOF
 if [ ! -e "/storage/zero.img" ]
 then
 	dd if=/dev/zero of=/storage/zero.img bs=1M count=85
@@ -61,7 +61,7 @@ fi
 ls /storage | grep img
 EOF
 # DENV
-ssh rootnh@192.168.120.116 << EOF
+ssh rootnh@192.168.200.116 << EOF
 if [ ! -e "/storage/zero.img" ]
 then
 	dd if=/dev/zero of=/storage/zero.img bs=1M count=57
@@ -73,9 +73,9 @@ EOF
 
 echo "*******Contacting receiving server"
 
-scp alias-file xfer-file rootnh@192.168.120.118:~
+scp alias-file xfer-file rootnh@192.168.200.118:~
 
-ssh rootnh@192.168.120.118 << EOF
+ssh rootnh@192.168.200.118 << EOF
 ifconfig eth1 mtu 9000
 ps aux | grep gridftp
 EOF
@@ -91,8 +91,8 @@ mkdir ~/$d
 for i in 111 112 113 114 115 116 118
 do
 	echo "********Third contact to $i"
-	scp rootnh@192.168.120.$i:~/$i.log ~/$d
-	ssh rootnh@192.168.120.$i << EOF
+	scp rootnh@192.168.200.$i:~/$i.log ~/$d
+	ssh rootnh@192.168.200.$i << EOF
 mkdir ~/$d
 mv *.log ~/$d
 ps aux | grep gridftp
