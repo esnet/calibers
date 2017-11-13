@@ -100,7 +100,7 @@ tc qdisc show
 EOF
 
 echo "*******Initiatiing Transfer"
-time globus-url-copy -cc 6 -p 1 -af calibersAliasFile -f xfer-file
+time globus-url-copy -cc 6 -p 1 -af calibersAliasFile -f calibersXferFile
 
 d=$(date +%F-%H-%M)
 mkdir ~/$d
