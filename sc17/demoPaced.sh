@@ -15,11 +15,11 @@ tc qdisc del dev eth1 root
 tc qdisc show dev eth1
 EOF
 done
-
-ssh rootnh@192.168.112.117 << EOF
+echo "*******Starting server"
+ssh rootnh@192.168.112.2 << EOF
 pkill gridftp
 ps aux | grep gridftp
-globus-gridftp-server -S -connections-max 6 -p 9117 -data-interface 192.168.112.117 -aa -anonymous-user 'nhanford' -home-dir / -Z ~/117.log -log-level all
+globus-gridftp-server -S -connections-max 24 -p 9002 -data-interface 192.168.112.2 -aa -anonymous-user 'nhanford' -home-dir / -Z ~/2.log -log-level all
 ps aux | grep gridftp
 ifconfig eth1 mtu 9000
 tc qdisc del dev eth1 root
