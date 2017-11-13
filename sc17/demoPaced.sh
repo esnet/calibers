@@ -2,7 +2,7 @@
 
 
 # create junk files, refresh servers
-for i in 190 191 192 194 200 201 117
+for i in 190 191 192 194 200 201
 do
 	echo "*******First contact to $i"
     ssh rootnh@192.168.112.$i << EOF
@@ -15,6 +15,17 @@ tc qdisc del dev eth1 root
 tc qdisc show dev eth1
 EOF
 done
+
+ssh rootnh@192.168.112.117 << EOF
+pkill gridftp
+ps aux | grep gridftp
+globus-gridftp-server -S -connections-max 6 -p 9117 -data-interface 192.168.112.117 -aa -anonymous-user 'nhanford' -home-dir / -Z ~/117.log -log-level all
+ps aux | grep gridftp
+ifconfig eth1 mtu 9000
+tc qdisc del dev eth1 root
+tc qdisc show dev eth1
+EOF
+
 # AMST
 ssh rootnh@192.168.112.190 << EOF
 if [ ! -e "/storage/zero.img" ]
