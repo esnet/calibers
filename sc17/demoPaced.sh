@@ -8,7 +8,7 @@ do
     ssh rootnh@192.168.112.$i << EOF
 pkill gridftp
 ps aux | grep gridftp
-globus-gridftp-server -S -p 8$i -data-interface 192.168.112.$i -aa -anonymous-user 'nhanford' -home-dir / -Z ~/$i.log -log-level all
+globus-gridftp-server -S -p 9$i -data-interface 192.168.112.$i -aa -anonymous-user 'nhanford' -home-dir / -Z ~/$i.log -log-level all
 ps aux | grep gridftp
 ifconfig eth1 mtu 9000
 tc qdisc del dev eth1 root
