@@ -38,9 +38,13 @@ def setRate(rate):
     
 class FileTransfer(Resource):
     def put(self, size):
-        print "GOT FILE"
-        dest = request.json['dest']
-        subprocess.Popen(('globus-url-copy -p 1 file:///storage/'+size+'.img ftp://'+dest).split())
+        #dest = request.json['dest']
+        #print "got request: " + dest
+        tmp = size.split('-')
+        size = tmp[0]
+        dest = tmp[1]
+        file = tmp[2]
+        subprocess.Popen(('globus-url-copy -vb -fast -p 4 file:///storage/'+size+' ftp://'+dest+":9002/data/" + file).split())
         time.sleep(.4) # Wait for the connection to establish
         output = subprocess.check_output('ss -int'.split())
         return output

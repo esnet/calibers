@@ -133,6 +133,9 @@ def get_config(config_file):
 	f = open(config_file)
 	conf = pickle.load(f)
 	f.close()
+	for site in conf.sites:
+		site.dtn.switch = site.switch
+
 	return conf
 
 class CoordRequest(scheduler.Request):
@@ -206,10 +209,10 @@ class Coordinator(threading.Thread):
 					req = new_requests[flow[0]]
 					self.start_flow(req)
 				for flow in updated_flows:
-					req = new_rrequests[flow[0]]
+					req = new_requests[flow[0]]
 					self.update_flow(req)
 				for flow in rejected_flows:
-					req = new_rrequests[flow[0]]
+					req = new_requests[flow[0]]
 					self.reject_flow(req)
 			end_time = time.time()
 			time_to_sleep = 1.0 - (end_time - start_time)
@@ -234,9 +237,10 @@ class Coordinator(threading.Thread):
 		pass
 
 	def start_flow_dtn(self, req):
-		url = "http://" + req.src_dtn.ip + ":5000/" + str(req.size)
+		url = "http://" + req.src_dtn.ip + ":5000/" + str(req.size) + '-' + req.dst_dtn.ip + '-' + req.src_dtn.name
 		try:
-			results = requests.get(url, params={'dest':'/data/' + req.src_dtn.name})
+			#results = requests.put(url, params={'dest': req.dst_dtn.ip + ':9002/data/' + req.src_dtn.name})
+			results = requests.put(url)
 		except requests.exceptions.RequestException:
 			return None
 		if results.status_code==200:
@@ -244,8 +248,9 @@ class Coordinator(threading.Thread):
 		else: 
 			return None
 
-	def meters_port(self, rate):
-		pass
+	def meters_port(self, req, rate):
+		switch = req.src_dtn.switch
+		switch.set_rate(rate)
 
 
 
