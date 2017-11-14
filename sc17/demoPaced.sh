@@ -36,7 +36,7 @@ fi
 ls /storage | grep img
 tc qdisc add dev eth1 root fq
 tc qdisc change dev eth1 root fq maxrate 171000002bit
-tc qdisc show
+tc qdisc show dev eth1
 EOF
 # CERN
 ssh rootnh@192.168.112.194 << EOF
@@ -48,7 +48,7 @@ fi
 ls /storage | grep img
 tc qdisc add dev eth1 root fq
 tc qdisc change dev eth1 root fq maxrate 149955555bit
-tc qdisc show
+tc qdisc show dev eth1
 EOF
 # AOFA
 ssh rootnh@192.168.112.191 << EOF
@@ -60,7 +60,7 @@ fi
 ls /storage | grep img
 tc qdisc add dev eth1 root fq
 tc qdisc change dev eth1 root fq maxrate 99777777bit
-tc qdisc show
+tc qdisc show dev eth1
 EOF
 # ATLA
 ssh rootnh@192.168.112.200 << EOF
@@ -72,7 +72,7 @@ fi
 ls /storage | grep img
 tc qdisc add dev eth1 root fq
 tc qdisc change dev eth1 root fq maxrate 49600000bit
-tc qdisc show
+tc qdisc show dev eth1
 EOF
 # WASH
 ssh rootnh@192.168.112.192 << EOF
@@ -96,7 +96,7 @@ fi
 ls /storage | grep img
 tc qdisc add dev eth1 root fq
 tc qdisc change dev eth1 root fq maxrate 19666666bit
-tc qdisc show
+tc qdisc show dev eth1
 EOF
 
 echo "*******Initiatiing Transfer"
@@ -106,7 +106,7 @@ d=$(date +%F-%H-%M)
 mkdir ~/$d
 
 # move logs
-for i in 190 191 192 194 200 201 117
+for i in 190 191 192 194 200 201
 do
 	echo "********Third contact to $i"
 	scp rootnh@192.168.112.$i:~/$i.log ~/$d
