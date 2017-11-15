@@ -11,7 +11,7 @@ epoch = 1.0
 class Scheduler:
     def __init__ (self,epochx,max_rate,algo,debug = False):
         global epoch
-        self.debug = debug
+        self.debug = debug 
         self.algo = algo
         epoch = epochx
         self.success_count = 0
@@ -149,10 +149,10 @@ class Scheduler:
 
         
     def sched(self,requests):
+        global epoch
         self.t_now = self.t_now + epoch
-        if self.debug == True:
+        if self.debug:
             print "\nt_now = ", self.t_now
-        
         # re-initialize the list for the new epoch requests
         self.updated_flows = [] #tuple of source and new rate
         self.new_flows = []
@@ -165,7 +165,6 @@ class Scheduler:
     
         #keep original flows info before reshaping/pacing
         self.original_flows_info = self.flows
-
         if len(self.flows) != 0:
             self.reshape() 
 
@@ -173,7 +172,6 @@ class Scheduler:
         if len(requests) == 0:
             #no new reuest, return empty lists
             return self.new_flows, self.rejected_flows, self.updated_flows
-
         for req in requests:
             self.no_request = self.no_request + 1
             new_f = flow(self.no_request,req.size,req.td,req.src,req.dst,self.t_now) # the new flow to schedul
@@ -185,18 +183,16 @@ class Scheduler:
             for f in self.flows:
                 temp_sum = temp_sum + self.flows[f].Ralloc
             Rresid = self.max_rate - temp_sum
-
             if(Rresid < new_f.Rmin):
                 self.pace(new_f)
             else:
                 new_f.set_rate(Rresid,self.t_now)
-                self.new_flows_temp[new_f.flow_id] = (new_f.src,new_f.Ralloc)
+                self.new_flows_temp[new_f.flow_id] = (new_f.src,new_f.Ralloc,new_f)
                 self.flows[new_f.flow_id] = new_f
                 
                 if self.debug == True:
                     print "Success, flow has been scheduled with rate ",new_f.Ralloc," te = ",new_f.te
                 self.success_count = self.success_count + 1
-
 
         for f in self.updated_flows_temp:
             if f in self.new_flows_temp:
@@ -211,7 +207,6 @@ class Scheduler:
 
         for f in self.new_flows_temp:
             self.new_flows.append(self.new_flows_temp[f])
-
         xx = 0
         for ff in self.flows:
             xx =xx + self.flows[ff].Ralloc
@@ -236,7 +231,7 @@ class flow:
         self.flow_id = flow_id
         self.src = src
         self.dst =dst
-        self.size = int(size*1e6*8) #unit bits
+        self.size = int(size*8) #unit bits
         self.td = t_now + td  #in sec
         self.te = self.td #unit in sec
         self.Rmax = int(10000*1e6) # unit bps, max rate the end points and the bottleneck link in the path can achieve
@@ -247,6 +242,7 @@ class flow:
         self.remain_data = int(self.size - self.sent_data)
 
     def update(self,t_now):
+        global epoch
         self.sent_data = int(self.sent_data + (self.Ralloc*epoch)) #in bits  
         self.remain_data = int(((self.size - self.sent_data)))
         self.Rmin = int(self.remain_data*1.0 / ((self.td - t_now)))

@@ -44,7 +44,7 @@ class FileTransfer(Resource):
         size = tmp[0]
         dest = tmp[1]
         file = tmp[2]
-        subprocess.Popen(('globus-url-copy -vb -fast -p 4 file:///storage/'+size+' ftp://'+dest+":9002/data/" + file).split())
+        subprocess.Popen(('globus-url-copy -vb -fast -p 1 file:///storage/'+size+' ftp://'+dest+":9002/data/" + file).split())
         time.sleep(.4) # Wait for the connection to establish
         output = subprocess.check_output('ss -int'.split())
         return output

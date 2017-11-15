@@ -156,7 +156,7 @@ class CoordRequest(scheduler.Request):
 		self.coordinator = None
 
 	def __str__(self):
-		return  self.src_dtn.name + " -> " + self.dst_dtn.name + " completion: " + str(self.percent_completion) + " deadline: " + str(self.td)
+		return  self.src_dtn.name + " -> " + self.dst_dtn.name + " size: " + str(self.size) + " completion: " + str(self.percent_completion) + " deadline: " + str(self.td)
 	def __repr__(self):
 		return self.__str__()
 
@@ -180,7 +180,7 @@ class Coordinator(threading.Thread):
 		self.algo = algo
 		self.max_rate = max_rate_mbps * 1000 * 1000
 		self.app_ip = app_ip
-		self.scheduler = scheduler.Scheduler(epochx=self.epoch_time,algo=self.algo,max_rate=self.max_rate,debug=False)
+		self.scheduler = scheduler.Scheduler(epochx=self.epoch_time,algo=self.algo,max_rate=self.max_rate,debug=True)
 		self.app = CoordApp(name="calibers-api", ip=self.app_ip, coord=self)
 
 	def get_next_requests(self):
@@ -202,11 +202,19 @@ class Coordinator(threading.Thread):
 		while (self.isRunning):
 			start_time = time.time()
 			new_requests = self.get_next_requests()
+			if Coordinator.debug:
+				print "new requests: ", new_requests
 			reqs = new_requests.values()
 			if len(reqs) > 0:
 				new_flows, rejected_flows, updated_flows = self.scheduler.sched(reqs)
+				if Coordinator.debug:
+					print "Accepted flows",new_flows
+					print "Update flows", updated_flows
+					print "Rejected flows", rejected_flows
 				for flow in new_flows:
+					print "FLOW",flow
 					req = new_requests[flow[0]]
+					req.rate = flow[1]
 					self.start_flow(req)
 				for flow in updated_flows:
 					req = new_requests[flow[0]]
@@ -215,7 +223,7 @@ class Coordinator(threading.Thread):
 					req = new_requests[flow[0]]
 					self.reject_flow(req)
 			end_time = time.time()
-			time_to_sleep = 1.0 - (end_time - start_time)
+			time_to_sleep = self.epoch_time - (end_time - start_time)
 			if (time_to_sleep < 0):
 				print "Cannot keep up with processing an epoch"
 			else:
@@ -228,7 +236,9 @@ class Coordinator(threading.Thread):
 		with self.lock:
 			self.current_requests[req.src_dtn.name] = req
 			self.monitor_pending_requests.append(req)
-		self.start_flow_dtn (req)
+		print "RATE",req.rate
+		self.set_rate(req)
+		self.start_flow_dtn(req)
 
 	def update_flow(self, req):
 		pass
@@ -237,15 +247,35 @@ class Coordinator(threading.Thread):
 		pass
 
 	def start_flow_dtn(self, req):
-		url = "http://" + req.src_dtn.ip + ":5000/" + str(req.size) + '-' + req.dst_dtn.ip + '-' + req.src_dtn.name
+		filename = str(req.size / 1024) + ".img"
+		url = "http://" + req.src_dtn.ip + ":5000/start/" + filename + '-' + req.dst_dtn.ip + '-' + req.src_dtn.name
+		print url
 		try:
 			#results = requests.put(url, params={'dest': req.dst_dtn.ip + ':9002/data/' + req.src_dtn.name})
 			results = requests.put(url)
 		except requests.exceptions.RequestException:
+			print "Can not reach ", req.dst_dtn.ip
 			return None
 		if results.status_code==200:
+			print "Success"
 			return results.text
 		else: 
+			print "Invalid request", req.dst_dtn.ip
+			return None
+
+	def set_rate(self, req):
+		url = "http://" + req.src_dtn.ip + ":5000/setrate/" + str(req.rate)
+		print url
+		try:
+			results = requests.get(url)
+		except requests.exceptions.RequestException:
+			print "Can not reach ", req.dst_dtn.ip
+			return None
+		if results.status_code==200:
+			print "Success",results.text
+			return results.text
+		else: 
+			print "Invalid request", req.dst_dtn.ip
 			return None
 
 	def meters_port(self, req, rate):
@@ -268,7 +298,7 @@ class SingleFileGen:
 		for iter in range(iterations):
 			reqs = []
 			for dtn in self.sources:
-				size = np.random.choice(self.buckets)
+				size = np.random.choice(self.buckets) * 1024 
 				min_duration = (size * 8.0 * self.padding) / self.capacity 
 				duration = min_duration * (np.random.exponential(scale=scale) + min_bias) + min_duration
 				dst = 0
@@ -335,9 +365,10 @@ class NewTransfers(Resource):
 		with self.app.coord.lock:
 			for req in  NewTransfers.app.coord.monitor_pending_requests:
 				entry = {}
-				entry["file_route"] = "/tmp/files_storage/" + req.src_dtn.name
-				entry["expected_size"] = req.size
+				entry["file_route"] = "/data/" + req.src_dtn.name
+				entry["expected_size"] = req.size * 1024
 				entry["deadline"] = time.time() + req.td
+				print "req.dst_dtn.name", time.time() + req.td
 				result[req.src_dtn.name] = entry
 			NewTransfers.app.coord.monitor_pending_requests = []	
 		return result
@@ -374,6 +405,7 @@ class FlowUpdate(Resource):
 
 	def put(self, filename):
 		args = FlowUpdate.parser.parse_args()
+		print "REPORT",args
 		return {'result': filename}
 
 class CoordApp:
